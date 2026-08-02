@@ -1,5 +1,5 @@
-import { getAllRecords, seedIfEmpty, filterRecords } from './db.js';
-import { seedData } from '../data/seed-data.js';
+import { getAllRecords, reseedIfNeeded, filterRecords } from './db.js';
+import { seedData, SEED_VERSION } from '../data/seed-data.js';
 
 const CATEGORY_LABELS = {
   przepisy: 'Przepisy prawne',
@@ -91,7 +91,7 @@ function updateOfflineIndicator() {
 }
 
 async function init() {
-  await seedIfEmpty(seedData);
+  await reseedIfNeeded(seedData, SEED_VERSION);
   allRecords = await getAllRecords();
   renderList();
   updateOfflineIndicator();

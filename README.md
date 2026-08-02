@@ -14,8 +14,9 @@ Co działa:
 
 Czego jeszcze nie ma (świadomie, kolejne kroki):
 - Formularza do dodawania/edycji treści przez UI (na razie dane wpisuje się ręcznie w `data/seed-data.js`).
-- Mechanizmu pobierania pakietu aktualizacji online (Faza 2 — dystrybucja do kolegów z dozoru).
-- Realnej, zweryfikowanej treści — `data/seed-data.js` zawiera wyłącznie rekordy przykładowe oznaczone `[PRZYKŁAD]`, nie prawdziwe przepisy/normy.
+- Mechanizmu pobierania pakietu aktualizacji **z zewnętrznego serwera** (Faza 2 — dystrybucja do kolegów z dozoru). Na razie aktualizacja treści działa lokalnie: zmiana `seed-data.js` + nowy commit + push wystarczą, appka sama się odświeży przy najbliższym uruchomieniu z zasięgiem (patrz niżej).
+
+Zawiera pierwsze 4 realne, zweryfikowane rekordy (jeden na kategorię) — źródła w `Zasoby/Przepisy-elektroenergetyka.md` i `Biznes/protokoly/_szablon-protokol-pomiaru-okresowego.md` w vaultcie Obsidian.
 
 ## Struktura
 
@@ -66,8 +67,12 @@ Dwie opcje:
 1. **Szybki test bez offline** — otwórz adres IP na telefonie, zobaczysz UI i dane, ale bez instalacji/offline. Dobre do sprawdzenia wyglądu.
 2. **Pełny test (rekomendowane)** — wrzuć folder na GitHub Pages (darmowy hosting statyczny z automatycznym HTTPS, ten sam mechanizm co już używane repo `backup-asystent-ai`). Wtedy masz prawdziwy adres `https://...github.io/...`, który otwierasz na telefonie — pełna instalacja, offline, wszystko działa tak jak będzie działać docelowo. To też ścieżka do realnej dystrybucji w Fazie 2 (jeden link do wysłania kolegom z dozoru).
 
-## Dodawanie/edycja treści (na razie ręcznie)
+## Dodawanie/edycja treści (na razie ręcznie w kodzie)
 
-Edytuj `data/seed-data.js` — dodaj kolejne obiekty do tablicy `seedData`, zgodnie z modelem rekordu wyżej. Po zmianie treści w tym pliku wyczyść dane appki w przeglądarce (DevTools → Application → IndexedDB → usuń bazę `dozor-baza-wiedzy`), żeby nowy seed się wczytał — `seedIfEmpty()` nie nadpisuje istniejących danych.
+1. Edytuj `data/seed-data.js` — dodaj/zmień obiekty w tablicy `seedData`, zgodnie z modelem rekordu wyżej.
+2. **Podbij `SEED_VERSION`** na górze tego samego pliku (np. `'2026-08-02-01'` → `'2026-08-02-02'`) — to jedyny sygnał, po którym appka pozna, że dane się zmieniły, i sama nadpisze lokalną bazę na telefonie (`reseedIfNeeded()` w `js/db.js`). Bez tego appka zignoruje zmiany, nawet jeśli plik na serwerze jest inny.
+3. Przy zmianie plików appki (nie tylko `seed-data.js`) podbij też `CACHE_NAME` w `service-worker.js` (np. `dozor-app-v2` → `dozor-app-v3`) — inaczej Service Worker będzie dalej serwował starą wersję z cache.
+4. `git add`, commit, `git push` — GitHub Pages przebuduje się automatycznie w ciągu 1-2 minut.
+5. Na telefonie appka podejmie aktualizację automatycznie przy najbliższym uruchomieniu z zasięgiem (Service Worker sam sprawdza sieć w tle po starcie). Jeśli chcesz wymusić to natychmiast: zamknij appkę całkowicie (usuń z ostatnich aplikacji) i otwórz ponownie z zasięgiem.
 
 **Pamiętaj o granicy treści:** tylko warstwa ogólna/uniwersalna (przepisy, normy, wzory, schematy niezakładowe). Żadnych materiałów KWK Piast (schematy 6kV, DTR-y, nastawy zabezpieczeń) — patrz uzasadnienie w `Zadania/w_trakcie/aplikacja-dozor-baza-wiedzy-pwa.md`.
