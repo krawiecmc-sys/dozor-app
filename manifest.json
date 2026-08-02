@@ -1,7 +1,7 @@
 {
-  "name": "Baza wiedzy dozoru",
-  "short_name": "Dozor",
-  "description": "Terenowa baza wiedzy dla dozoru: przepisy, normy, wzory dokumentów, schematy. Działa w pełni offline.",
+  "name": "PROTEKTOR",
+  "short_name": "PROTEKTOR",
+  "description": "Narzędzie terenowe dla dozoru nadzorującego przydzielone urządzenia i instalacje w rejonach wydobywczych, przodkowych i ścianowych: nadzór nad prawidłowością działania, diagnostyka problemów produkcyjno-technologicznych oraz baza wiedzy (przepisy, normy, wzory, dokumentacja techniczna). Działa w pełni offline.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

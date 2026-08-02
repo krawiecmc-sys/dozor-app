@@ -1,78 +1,78 @@
-# Baza wiedzy dozoru (PWA) — szkielet
+# PROTEKTOR (PWA)
 
-Terenowa baza wiedzy dla dozoru: przepisy prawne, normy techniczne, wzory dokumentów, schematy uniwersalne. Działa w pełni offline po pierwszym uruchomieniu z zasięgiem.
+Narzędzie terenowe dla dozoru nadzorującego przydzielone urządzenia i instalacje w rejonach wydobywczych, przodkowych i ścianowych: nadzór nad prawidłowością działania, diagnostyka problemów produkcyjno-technologicznych oraz baza wiedzy. Działa w pełni offline po pierwszym uruchomieniu z zasięgiem.
 
 Kontekst decyzji i pełne ustalenia: `Notatki/sesje/2026-08-02.md` i `Zadania/w_trakcie/aplikacja-dozor-baza-wiedzy-pwa.md` w vaultcie `D:\obsidian_1\OBCLATECH`. Ten folder to osobny projekt kodu, celowo poza vaultem Obsidian.
 
-## Status: szkielet (MVP w budowie)
+## Trzy główne zakładki
 
-Co działa:
-- Przeglądanie i wyszukiwanie rekordów (tytuł, treść, tagi) w 4 kategoriach.
-- Lokalna baza danych w przeglądarce (IndexedDB) — działa offline.
-- Instalacja jako appka na Androidzie ("Dodaj do ekranu głównego").
-- Service Worker z cache-first — appka i dane dostępne bez zasięgu.
+1. **Nadzór rejonu** — dane operacyjne, w pełni edytowalne:
+   - *Sprzęt i przegląd bieżący*: Przodek, Kombajn (AM-1..AM-6 + nr fabryczny + lista zabezpieczeń z datą legalizacji), Urządzenia rejonowe (zabezpieczenia jako edytowalna lista), Zabezpieczenia (katalog), Transformatory, Pole rozdzielcze, Chodniki i trasy kablowe (z sublistą wolnych odcinków), Przegląd — Bieżący (log obchodów).
+   - *Przegląd OUG/WUG*: drzewiasta checklista dowolnej głębokości (punkty główne + podpunkty), checkbox wykonano/nie, dodawanie/edycja/usuwanie na każdym poziomie.
+2. **Diagnostyka** — Baza (opisane, rozwiązane przypadki problemów produkcyjno-technologicznych) i Analiza (bieżący problem w trakcie diagnozy).
+3. **Baza wiedzy** — Przepisy prawne, Normy techniczne, Wzory dokumentów, Schematy uniwersalne, Dokumentacja techniczna, Urządzenia. W pełni edytowalna przez UI (nie tylko `seed-data.js`).
 
-Czego jeszcze nie ma (świadomie, kolejne kroki):
-- Formularza do dodawania/edycji treści przez UI (na razie dane wpisuje się ręcznie w `data/seed-data.js`).
-- Mechanizmu pobierania pakietu aktualizacji **z zewnętrznego serwera** (Faza 2 — dystrybucja do kolegów z dozoru). Na razie aktualizacja treści działa lokalnie: zmiana `seed-data.js` + nowy commit + push wystarczą, appka sama się odświeży przy najbliższym uruchomieniu z zasięgiem (patrz niżej).
+## Zabezpieczenia w danych — ważna zasada
 
-Zawiera pierwsze 4 realne, zweryfikowane rekordy (jeden na kategorię) — źródła w `Zasoby/Przepisy-elektroenergetyka.md` i `Biznes/protokoly/_szablon-protokol-pomiaru-okresowego.md` w vaultcie Obsidian.
+Dane operacyjne (Nadzór rejonu) i tak jest to warstwa zakładowa co do zasady, ale appka **zawiera wyłącznie treści przykładowe/fikcyjne** (oznaczone `PRZYKŁAD`) — żadnych realnych numerów, nastaw, identyfikatorów z KWK Piast, dopóki nie zostanie potwierdzona zgodność z polityką bezpieczeństwa/IT pracodawcy. Patrz uzasadnienie w `Zadania/w_trakcie/aplikacja-dozor-baza-wiedzy-pwa.md`.
+
+## Kod dostępu (TOTP)
+
+Appka jest zablokowana ekranem z kodem dostępu, który **zmienia się raz na dobę** (algorytm TOTP, liczony lokalnie, offline — RFC 6238, HMAC-SHA1, okres 1 doba zamiast typowych 30s). Kod generowany jest z sekretu w `js/totp-secret.js`. Właściciel appki (Piotr) ma dodatkowo stały **klucz nadrzędny** (`granat-dozor-7828-wentyl`), który zawsze działa, niezależnie od dnia — zapisany w kodzie tylko jako hash SHA-256, nie wprost.
+
+**Ważne zastrzeżenie, nie do pominięcia:** appka jest hostowana jako statyczny kod na GitHub Pages — publicznie pobieralny przez każdego, kto zna URL. Ta bramka **nie jest ochroną danych poufnych** (i tak żadnych tu nie ma — patrz wyżej), tylko filtrem przed przypadkowym dostępem osób, które natrafiły na link bez wiedzy właściciela. Osoba technicznie zdeterminowana może odczytać sekret z kodu źródłowego appki i policzyć kody samodzielnie.
+
+Odblokowanie zapisuje się per urządzenie (localStorage) — dzienny kod odblokowuje tylko do końca danego dnia (UTC), klucz nadrzędny odblokowuje appkę trwale na tym urządzeniu.
 
 ## Struktura
 
 ```
 dozor-app/
-├── index.html          # szkielet appki (app shell)
-├── manifest.json        # metadane PWA (nazwa, ikona, kolor)
-├── service-worker.js    # cache-first, obsługa offline
-├── icons/icon.svg        # ikona appki (placeholder, do zamiany)
-├── css/style.css         # style
+├── index.html                 # app shell + ekran bramki dostępu
+├── manifest.json               # metadane PWA
+├── service-worker.js           # cache-first, obsługa offline
+├── icons/icon.svg               # ikona appki (placeholder)
+├── css/style.css                # style (wspólne dla wszystkich modułów)
 ├── js/
-│   ├── app.js            # logika UI: lista, filtr, szczegóły, wyszukiwarka
-│   └── db.js              # warstwa IndexedDB (odczyt/zapis rekordów)
+│   ├── gate.js                  # ekran bramki dostępu (TOTP), ładuje app.js po odblokowaniu
+│   ├── totp.js                  # algorytm TOTP + weryfikacja kodu/klucza nadrzędnego
+│   ├── totp-secret.js           # sekret TOTP + hash klucza nadrzędnego
+│   ├── app.js                   # główna logika: przełącznik sekcji, Baza wiedzy (CRUD)
+│   ├── db.js                    # warstwa IndexedDB (generyczne CRUD + bezpieczny reseed)
+│   ├── crud-module.js           # generyczny moduł list+formularz (w tym pola 'sublist')
+│   ├── nadzor-entities.js       # definicje encji Nadzoru rejonu
+│   ├── nadzor.js                # instancja crud-module dla Nadzoru rejonu
+│   ├── oug-wug.js                # drzewiasta checklista OUG/WUG
+│   ├── diagnostyka-entities.js  # definicje encji Diagnostyki
+│   └── diagnostyka.js            # instancja crud-module dla Diagnostyki
 └── data/
-    └── seed-data.js       # przykładowe rekordy startowe
-```
-
-### Model rekordu
-
-```js
-{
-  id: 'kategoria-unikalny-id',
-  category: 'przepisy' | 'normy' | 'wzory' | 'schematy',
-  title: 'Tytuł',
-  tags: ['tag1', 'tag2'],
-  source: 'Podstawa prawna / źródło',
-  body: 'Treść rekordu (tekst).',
-  attachment: null,       // później: ścieżka do PDF/obrazu
-  updatedAt: '2026-08-02',
-}
+    └── seed-data.js              # startowe rekordy Bazy wiedzy (z SEED_VERSION)
 ```
 
 ## Jak uruchomić lokalnie (na komputerze)
 
-Service Worker wymaga serwera HTTP (nie działa z otwarcia pliku `index.html` bezpośrednio przez `file://`). Najprościej przez wbudowany serwer Pythona:
+Service Worker wymaga serwera HTTP (nie działa z otwarcia pliku `index.html` przez `file://`):
 
 ```
 "C:\Python314\python.exe" -m http.server 8000
 ```
 
-(uruchom z tego folderu), potem otwórz `http://localhost:8000` w Chrome na komputerze. Na `localhost` Service Worker działa w pełni — to jedyny wyjątek od wymogu HTTPS.
+(uruchom z tego folderu), potem otwórz `http://localhost:8000` w Chrome. Na `localhost` Service Worker działa w pełni — to jedyny wyjątek od wymogu HTTPS.
 
 ## Jak przetestować na prawdziwym telefonie
 
-**Ważne:** Chrome na Androidzie wymaga HTTPS do rejestracji Service Workera (poza `localhost`). Otwarcie appki przez adres IP komputera w tej samej sieci Wi-Fi (`http://192.168.x.x:8000`) **nie zarejestruje Service Workera** — appka odpali się, ale bez trybu offline i bez możliwości instalacji.
+Chrome na Androidzie wymaga HTTPS do rejestracji Service Workera (poza `localhost`). Adres IP komputera w tej samej sieci Wi-Fi pokaże UI, ale bez offline/instalacji. **Pełny test:** GitHub Pages (`https://krawiecmc-sys.github.io/dozor-app/`) — darmowy, automatyczny HTTPS, prawdziwa instalacja i offline.
 
-Dwie opcje:
-1. **Szybki test bez offline** — otwórz adres IP na telefonie, zobaczysz UI i dane, ale bez instalacji/offline. Dobre do sprawdzenia wyglądu.
-2. **Pełny test (rekomendowane)** — wrzuć folder na GitHub Pages (darmowy hosting statyczny z automatycznym HTTPS, ten sam mechanizm co już używane repo `backup-asystent-ai`). Wtedy masz prawdziwy adres `https://...github.io/...`, który otwierasz na telefonie — pełna instalacja, offline, wszystko działa tak jak będzie działać docelowo. To też ścieżka do realnej dystrybucji w Fazie 2 (jeden link do wysłania kolegom z dozoru).
+## Aktualizacja treści/kodu
 
-## Dodawanie/edycja treści (na razie ręcznie w kodzie)
+1. Zmień pliki (kod appki i/lub `data/seed-data.js`).
+2. Jeśli zmieniasz `seed-data.js` — podbij `SEED_VERSION` na górze pliku. Reseed jest **bezpieczny**: nadpisuje tylko rekordy, których user nigdy nie edytował w appce (`_userEdited: false`); rekordy edytowane ręcznie przez usera zostają nietknięte.
+3. Jeśli zmieniasz jakikolwiek plik appki (JS/CSS/HTML) — podbij `CACHE_NAME` w `service-worker.js`, inaczej Service Worker będzie serwował starą wersję z cache.
+4. `git add`, commit, `git push` — GitHub Pages przebuduje się automatycznie (1-2 min).
+5. Na telefonie: zamknij appkę całkowicie (usuń z ostatnich aplikacji) i otwórz ponownie z zasięgiem, żeby wymusić natychmiastową aktualizację.
 
-1. Edytuj `data/seed-data.js` — dodaj/zmień obiekty w tablicy `seedData`, zgodnie z modelem rekordu wyżej.
-2. **Podbij `SEED_VERSION`** na górze tego samego pliku (np. `'2026-08-02-01'` → `'2026-08-02-02'`) — to jedyny sygnał, po którym appka pozna, że dane się zmieniły, i sama nadpisze lokalną bazę na telefonie (`reseedIfNeeded()` w `js/db.js`). Bez tego appka zignoruje zmiany, nawet jeśli plik na serwerze jest inny.
-3. Przy zmianie plików appki (nie tylko `seed-data.js`) podbij też `CACHE_NAME` w `service-worker.js` (np. `dozor-app-v2` → `dozor-app-v3`) — inaczej Service Worker będzie dalej serwował starą wersję z cache.
-4. `git add`, commit, `git push` — GitHub Pages przebuduje się automatycznie w ciągu 1-2 minut.
-5. Na telefonie appka podejmie aktualizację automatycznie przy najbliższym uruchomieniu z zasięgiem (Service Worker sam sprawdza sieć w tle po starcie). Jeśli chcesz wymusić to natychmiast: zamknij appkę całkowicie (usuń z ostatnich aplikacji) i otwórz ponownie z zasięgiem.
+## Świadomie odłożone na później
 
-**Pamiętaj o granicy treści:** tylko warstwa ogólna/uniwersalna (przepisy, normy, wzory, schematy niezakładowe). Żadnych materiałów KWK Piast (schematy 6kV, DTR-y, nastawy zabezpieczeń) — patrz uzasadnienie w `Zadania/w_trakcie/aplikacja-dozor-baza-wiedzy-pwa.md`.
+- Prawdziwy mechanizm pobierania pakietu aktualizacji z zewnętrznego serwera (Faza 2 — dystrybucja do kolegów z dozoru; na razie aktualizacja to git push + odświeżenie appki).
+- Scalanie danych wielu userów w jeden zbiorczy zestaw (możliwe przez eksport/import JSON, niezbudowane).
+- Prosty dashboard z mapą/grafem drzewiastym urządzeń.
