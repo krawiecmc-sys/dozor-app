@@ -7,9 +7,31 @@
 
 // Podbij przy każdej zmianie treści poniżej — to wymusza odświeżenie
 // lokalnej bazy na telefonie (patrz reseedIfNeeded w js/db.js).
-export const SEED_VERSION = '2026-08-02-01';
+export const SEED_VERSION = '2026-08-02-02';
 
 export const seedData = [
+  {
+    id: 'przepisy-prawo-geologiczne-gornicze',
+    category: 'przepisy',
+    title: 'Prawo geologiczne i górnicze — ustawa',
+    tags: ['prawo geologiczne i górnicze', 'górnictwo podziemne', 'ustawa'],
+    source: 'Ustawa z dnia 9 czerwca 2011 r. Prawo geologiczne i górnicze (tekst jednolity: Dz.U. 2026 poz. 69)',
+    body:
+      'Podstawowy akt prawny regulujący całą działalność geologiczną i górniczą w Polsce — obejmuje górnictwo podziemne, otworowe i odkrywkowe. Określa m.in.: zasady koncesjonowania działalności górniczej, obowiązki przedsiębiorcy górniczego, wymagania kwalifikacyjne dla osób kierownictwa i dozoru ruchu zakładu górniczego, zasady prowadzenia ruchu zakładu górniczego i sporządzania planu ruchu, nadzór i kontrolę sprawowaną przez Wyższy Urząd Górniczy (WUG) i okręgowe urzędy górnicze (OUG). To ustawa „matka", na podstawie której wydawane są szczegółowe rozporządzenia wykonawcze (np. ws. ruchu podziemnych zakładów górniczych).',
+    attachment: null,
+    updatedAt: '2026-08-02',
+  },
+  {
+    id: 'przepisy-ruch-zakladow-podziemnych',
+    category: 'przepisy',
+    title: 'Szczegółowe wymagania dot. ruchu podziemnych zakładów górniczych — rozporządzenie',
+    tags: ['ruch zakładu górniczego', 'górnictwo podziemne', 'bhp górnictwo'],
+    source: 'Rozporządzenie Ministra Energii z dnia 23 listopada 2016 r. w sprawie szczegółowych wymagań dotyczących prowadzenia ruchu podziemnych zakładów górniczych (Dz.U. 2017 poz. 1118, z późn. zm.)',
+    body:
+      'Kluczowy akt wykonawczy do Prawa geologicznego i górniczego — najbardziej szczegółowy zbiór wymagań technicznych i organizacyjnych dla ruchu podziemnego zakładu górniczego. Obejmuje m.in.: bezpieczeństwo i higienę pracy, zabezpieczenie przeciwpożarowe, wentylację i zwalczanie zagrożeń naturalnych (metanowego, pyłowego, tąpań, wodnego), budowę i eksploatację wyrobisk, urządzenia i instalacje — w tym elektryczne (wymogi budowy przeciwwybuchowej/iskrobezpiecznej w strefach zagrożonych wybuchem), transport i przewóz ludzi, ratownictwo górnicze. Uwaga: nowelizowane częściej niż ustawa macierzysta (m.in. 2019, 2020) — przed powołaniem się na konkretny paragraf w realnej sytuacji zawsze zweryfikuj aktualny tekst jednolity na ISAP.',
+    attachment: null,
+    updatedAt: '2026-08-02',
+  },
   {
     id: 'przepisy-kp-art-207',
     category: 'przepisy',
