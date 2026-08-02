@@ -1,0 +1,19 @@
+{
+  "name": "Baza wiedzy dozoru",
+  "short_name": "Dozor",
+  "description": "Terenowa baza wiedzy dla dozoru: przepisy, normy, wzory dokumentów, schematy. Działa w pełni offline.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b1f33",
+  "theme_color": "#0b1f33",
+  "icons": [
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

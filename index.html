@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1f33">
+<title>Baza wiedzy dozoru</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon.svg">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="app-header">
+  <h1>Baza wiedzy dozoru</h1>
+  <input id="search" type="search" placeholder="Szukaj (tytuł, treść, tagi)..." autocomplete="off">
+</header>
+
+<nav id="category-filter" class="category-filter">
+  <button class="chip active" data-category="all">Wszystko</button>
+  <button class="chip" data-category="przepisy">Przepisy prawne</button>
+  <button class="chip" data-category="normy">Normy techniczne</button>
+  <button class="chip" data-category="wzory">Wzory dokumentów</button>
+  <button class="chip" data-category="schematy">Schematy uniwersalne</button>
+</nav>
+
+<main id="content">
+  <ul id="record-list" class="record-list"></ul>
+  <section id="record-detail" class="record-detail hidden"></section>
+</main>
+
+<p id="offline-indicator" class="offline-indicator hidden">Tryb offline — dane z lokalnej kopii na telefonie.</p>
+
+<script type="module" src="js/db.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
