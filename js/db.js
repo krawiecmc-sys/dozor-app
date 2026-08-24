@@ -100,7 +100,7 @@ export async function clearRecords() {
   });
 }
 
-async function getMeta(key) {
+export async function getMeta(key) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_META, 'readonly');
@@ -110,7 +110,7 @@ async function getMeta(key) {
   });
 }
 
-async function setMeta(key, value) {
+export async function setMeta(key, value) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_META, 'readwrite');
@@ -244,6 +244,27 @@ export async function nadzorSeedExampleIfNeeded(storeName, exampleRecord) {
 //     DODAJE tylko te, których jeszcze nie ma lokalnie; istniejące (także
 //     te z seed-data.js) zostają nietknięte, żeby nie nadpisać niczyjej
 //     pracy w żadną stronę.
+
+// --- Przypomnienie o eksporcie: dane operacyjne żyją tylko lokalnie na tym
+// telefonie (patrz komentarz wyżej), więc appka sama pilnuje, kiedy ostatnio
+// zrobiono eksport i czy w ogóle jest co eksportować (nie ma sensu nękać
+// przypomnieniem, jeśli user ma tylko domyślne dane PRZYKŁAD).
+
+export async function getLastExportAt() {
+  return getMeta('lastExportAt');
+}
+
+export async function markExported() {
+  await setMeta('lastExportAt', new Date().toISOString());
+}
+
+export async function hasAnyNadzorData() {
+  for (const storeName of NADZOR_STORES) {
+    const records = await nadzorGetAll(storeName);
+    if (records.length > 0) return true;
+  }
+  return false;
+}
 
 export async function exportAllData(label) {
   const nadzor = {};

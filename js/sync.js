@@ -1,4 +1,4 @@
-import { exportAllData, importAllData } from './db.js';
+import { exportAllData, importAllData, markExported } from './db.js';
 
 const labelInput = document.getElementById('sync-export-label');
 const exportBtn = document.getElementById('sync-export-btn');
@@ -20,7 +20,7 @@ function countRecords(data) {
   return { total, wiedzaCount, perStore };
 }
 
-export function initSync({ onImported } = {}) {
+export function initSync({ onImported, onExported } = {}) {
   exportBtn.addEventListener('click', async () => {
     const label = labelInput.value.trim();
     const data = await exportAllData(label);
@@ -37,6 +37,9 @@ export function initSync({ onImported } = {}) {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+
+    await markExported();
+    if (onExported) await onExported();
   });
 
   importInput.addEventListener('change', async () => {

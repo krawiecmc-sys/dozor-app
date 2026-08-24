@@ -4,6 +4,7 @@ import { initNadzor, refreshNadzor, editNadzorRecord } from './nadzor.js';
 import { initOugWug, refreshOugWug } from './oug-wug.js';
 import { initDiagnostyka, refreshDiagnostyka } from './diagnostyka.js';
 import { initSync } from './sync.js';
+import { checkExportReminder } from './export-reminder.js';
 import { renderDashboard } from './dashboard.js';
 import { createChainBuilder } from './chain-builder.js';
 
@@ -23,6 +24,9 @@ const detailEl = document.getElementById('record-detail');
 const searchEl = document.getElementById('search');
 const filterEl = document.getElementById('category-filter');
 const offlineIndicator = document.getElementById('offline-indicator');
+const exportReminderEl = document.getElementById('export-reminder');
+const exportReminderBtn = document.getElementById('export-reminder-btn');
+const exportReminderDismissBtn = document.getElementById('export-reminder-dismiss');
 const wiedzaAddBtn = document.getElementById('wiedza-add-btn');
 const wiedzaFormEl = document.getElementById('wiedza-form-container');
 
@@ -336,10 +340,24 @@ async function init() {
       await refreshRecords();
       renderList();
     },
+    onExported: async () => {
+      exportReminderEl.classList.add('hidden');
+    },
   });
+
+  await checkExportReminder(exportReminderEl);
   // Rejestracja Service Workera przeniesiona do index.html (poza modułami) —
   // patrz komentarz tam, żeby padnięcie tego pliku na błędzie importu nie
   // blokowało appce możliwości samo-naprawy przez aktualizację workera.
 }
+
+exportReminderBtn.addEventListener('click', () => {
+  sectionSwitchEl.querySelector('[data-section="sync"]').click();
+  exportReminderEl.classList.add('hidden');
+});
+
+exportReminderDismissBtn.addEventListener('click', () => {
+  exportReminderEl.classList.add('hidden');
+});
 
 init();

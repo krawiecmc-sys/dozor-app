@@ -148,6 +148,37 @@ body {
   padding: 2rem 1rem;
 }
 
+.export-reminder {
+  background: var(--danger);
+  color: var(--white);
+  padding: 0.6rem 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.export-reminder-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.export-reminder .btn-small {
+  background: var(--white);
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.export-reminder .btn-ghost {
+  background: transparent;
+  color: var(--white);
+  font-weight: 400;
+  border: 1px solid var(--white);
+}
+
 .offline-indicator {
   position: fixed;
   bottom: 0;

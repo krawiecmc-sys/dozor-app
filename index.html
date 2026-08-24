@@ -28,6 +28,14 @@
   <input id="search" type="search" class="hidden" placeholder="Szukaj (tytuł, treść, tagi)..." autocomplete="off">
 </header>
 
+<div id="export-reminder" class="export-reminder hidden">
+  <span class="export-reminder-text"></span>
+  <div class="export-reminder-actions">
+    <button id="export-reminder-btn" class="btn-small">Eksportuj teraz</button>
+    <button id="export-reminder-dismiss" class="btn-small btn-ghost" aria-label="Ukryj do następnego otwarcia appki">Ukryj</button>
+  </div>
+</div>
+
 <nav id="section-switch" class="section-switch">
   <button class="section-btn active" data-section="nadzor">Nadzór rejonu</button>
   <button class="section-btn" data-section="diagnostyka">Diagnostyka</button>
