@@ -3,7 +3,7 @@ import { seedData, SEED_VERSION } from '../data/seed-data.js';
 import { initNadzor, refreshNadzor, editNadzorRecord } from './nadzor.js';
 import { initOugWug, refreshOugWug } from './oug-wug.js';
 import { initDiagnostyka, refreshDiagnostyka } from './diagnostyka.js';
-import { initSync } from './sync.js';
+import { initSync, runIntegrityCheck } from './sync.js';
 import { checkExportReminder } from './export-reminder.js';
 import { renderDashboard } from './dashboard.js';
 import { createChainBuilder } from './chain-builder.js';
@@ -346,6 +346,7 @@ async function init() {
   });
 
   await checkExportReminder(exportReminderEl);
+  await runIntegrityCheck(); // samonaprawa/kontrola integralności — patrz sync.js
   // Rejestracja Service Workera przeniesiona do index.html (poza modułami) —
   // patrz komentarz tam, żeby padnięcie tego pliku na błędzie importu nie
   // blokowało appce możliwości samo-naprawy przez aktualizację workera.

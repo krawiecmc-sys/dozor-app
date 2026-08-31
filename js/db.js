@@ -1,28 +1,42 @@
 const DB_NAME = 'dozor-baza-wiedzy';
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 const STORE = 'wiedza';
 const STORE_META = 'meta';
 const SEED_VERSION_KEY = 'seedVersion';
 
-// Magazyny "Nadzoru rejonu" — dane operacyjne zakładowe (przodki, kombajny,
-// urządzenia rejonowe, katalog zabezpieczeń, transformatory, pola
-// rozdzielcze, chodniki+trasy kablowe), magazyn "Przeglądu" (log obchodów,
-// bieżący + OUG/WUG) i magazyn "Diagnostyki" (baza przypadków + analiza).
-// W odróżnieniu od STORE ("wiedza") te rekordy user tworzy/edytuje sam
-// w appce — id nadawane automatycznie (autoIncrement), nie z góry ustalone
-// jak w seed-data.js.
+// Magazyny "Rejonu" — dane operacyjne zakładowe, schemat przeprojektowany
+// 31.08.2026 z prawdziwymi kluczami obcymi zamiast dopasowania tekstu:
+// rozdzielnie -> poleRozdzielcze (miejsce_zabudowy, fk-or-free) -> kb
+// (silniki[]/czujniki[], fk-multi) -> silniki / czujniki. Magazyn
+// "Przeglądu" (bieżący + OUG/WUG) i magazyn "Diagnostyki" (baza + analiza)
+// bez zmian. Stare magazyny (przodki/kombajny/urzadzeniaRejonowe/
+// zabezpieczeniaKatalog/transformatory/chodnikiTrasy) świadomie usunięte —
+// patrz plan reorganizacji, sekcja "Co znika". W odróżnieniu od STORE
+// ("wiedza") te rekordy user tworzy/edytuje sam w appce — id nadawane
+// automatycznie (autoIncrement), nie z góry ustalone jak w seed-data.js.
 export const NADZOR_STORES = [
+  'rozdzielnie',
+  'poleRozdzielcze',
+  'kb',
+  'czujniki',
+  'silniki',
+  'przegladyBiezace',
+  'przegladyOugWug',
+  'diagnostykaBaza',
+  'diagnostykaAnaliza',
+];
+
+// Stare nazwy magazynów z poprzedniego schematu (sprzed 31.08.2026) — appka
+// je jeszcze otwiera przy onupgradeneeded (żeby czyściście je skasować przy
+// pierwszym uruchomieniu nowej wersji), ale NIE są już częścią NADZOR_STORES
+// (eksport/import/samonaprawa ich nie dotyczą).
+const STARE_MAGAZYNY_DO_USUNIECIA = [
   'przodki',
   'kombajny',
   'urzadzeniaRejonowe',
   'zabezpieczeniaKatalog',
   'transformatory',
-  'poleRozdzielcze',
   'chodnikiTrasy',
-  'przegladyBiezace',
-  'przegladyOugWug',
-  'diagnostykaBaza',
-  'diagnostykaAnaliza',
 ];
 
 // WAŻNE (naprawione po realnym zawieszeniu appki w teście 2026-08-02):
@@ -50,6 +64,14 @@ function openDB() {
       for (const name of NADZOR_STORES) {
         if (!db.objectStoreNames.contains(name)) {
           db.createObjectStore(name, { keyPath: 'id', autoIncrement: true });
+        }
+      }
+      // Sprzątanie starego schematu (31.08.2026) — dane w tych magazynach to
+      // wyłącznie PRZYKŁAD (placeholder), więc bezpiecznie je kasujemy razem
+      // z bumpem wersji zamiast pisać transformację danych do nowego schematu.
+      for (const name of STARE_MAGAZYNY_DO_USUNIECIA) {
+        if (db.objectStoreNames.contains(name)) {
+          db.deleteObjectStore(name);
         }
       }
     };
@@ -227,6 +249,85 @@ export async function nadzorSeedExampleIfNeeded(storeName, exampleRecord) {
     await nadzorAdd(storeName, exampleRecord);
   }
   await setMeta(seededKey, true);
+}
+
+// --- Samonaprawa / kontrola integralności bazy (31.08.2026) ---
+//
+// PWA bez backendu -> "okresowa" samonaprawa w praktyce oznacza: uruchomienie
+// automatyczne przy każdym starcie appki (wołane z app.js, jak dzisiejszy
+// reseedIfNeeded) + ten sam skan dostępny na żądanie z przycisku. Prawdziwe
+// działanie w tle przy zamkniętej appce nie jest możliwe bez serwera.
+//
+// `entities` to obiekt NADZOR_ENTITIES (z nadzor-entities.js) — db.js
+// zostaje generyczny, nie zna sam struktury pól, tylko czyta ją z przekazanej
+// definicji (ten sam wzorzec co reszta modułu "nadzorX").
+export async function sprawdzIntegralnosc(entities) {
+  const wyniki = { osierocone: [], niedopasowaneWolnyTekst: [], mozliweDuplikaty: [] };
+  const cache = {};
+  async function getCached(storeName) {
+    if (!cache[storeName]) cache[storeName] = await nadzorGetAll(storeName);
+    return cache[storeName];
+  }
+
+  for (const [entityKey, def] of Object.entries(entities)) {
+    const records = await getCached(entityKey);
+
+    for (const f of def.fields) {
+      if (f.type === 'fk-multi') {
+        const refRecords = await getCached(f.refStore);
+        const refIds = new Set(refRecords.map((r) => r.id));
+        for (const rec of records) {
+          for (const id of Array.isArray(rec[f.key]) ? rec[f.key] : []) {
+            if (!refIds.has(id)) {
+              wyniki.osierocone.push({
+                store: entityKey, id: rec.id, nazwaRekordu: rec[def.titleField],
+                pole: f.key, brakujacyId: id, refStore: f.refStore,
+              });
+            }
+          }
+        }
+      }
+
+      if (f.type === 'fk-or-free') {
+        const refRecords = await getCached(f.refStore);
+        const refIds = new Set(refRecords.map((r) => r.id));
+        const refLabels = new Set(refRecords.map((r) => String(r[f.refField] || '').trim().toLowerCase()));
+        for (const rec of records) {
+          const val = rec[f.key];
+          if (val === undefined || val === null || val === '') continue;
+          if (typeof val === 'number' && !refIds.has(val)) {
+            wyniki.osierocone.push({
+              store: entityKey, id: rec.id, nazwaRekordu: rec[def.titleField],
+              pole: f.key, brakujacyId: val, refStore: f.refStore,
+            });
+          } else if (typeof val === 'string' && !refLabels.has(val.trim().toLowerCase())) {
+            wyniki.niedopasowaneWolnyTekst.push({
+              store: entityKey, id: rec.id, nazwaRekordu: rec[def.titleField],
+              pole: f.key, wartosc: val, refStore: f.refStore,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Zduplikowane nazwy w obrębie tej samej encji (case/whitespace-insensitive)
+  // — sugestia do scalenia, nie twardy błąd.
+  for (const [entityKey, def] of Object.entries(entities)) {
+    const records = await getCached(entityKey);
+    const seen = new Map();
+    for (const rec of records) {
+      const norm = String(rec[def.titleField] || '').trim().toLowerCase();
+      if (!norm) continue;
+      if (seen.has(norm)) {
+        wyniki.mozliweDuplikaty.push({ store: entityKey, id: rec.id, innyId: seen.get(norm), wartosc: rec[def.titleField] });
+      } else {
+        seen.set(norm, rec.id);
+      }
+    }
+  }
+
+  return wyniki;
 }
 
 // --- Synchronizacja między userami: eksport/import (bez serwera) ---

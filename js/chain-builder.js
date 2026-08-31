@@ -247,5 +247,20 @@ export function createChainBuilder(containerId) {
     await render();
   }
 
-  return { init: render };
+  // 31.08.2026: Kreator łańcucha odwoływał się do starego schematu
+  // (chodnikiTrasy/poleRozdzielcze/transformatory/urzadzeniaRejonowe/
+  // przodki/kombajny) — te magazyny zniknęły przy przejściu na realne klucze
+  // obce. Pełna przebudowa (ekstrakcja chip-pickera do widoku graficznego,
+  // usunięcie steppera) to Faza 2/4 planu reorganizacji — tymczasowo widok
+  // pokazuje czytelny komunikat zamiast wołać stary render() i wywalać
+  // wyjątek na nieistniejącym object store.
+  function renderPrzebudowa() {
+    container.innerHTML = `
+      <p class="empty-state">Kreator łańcucha jest w trakcie przebudowy pod nowy schemat danych
+      (Rozdzielnia → Pole rozdzielcze → KB → Silniki/Czujniki) — wraca w kolejnym kroku reorganizacji.
+      W międzyczasie użyj zwykłych formularzy w zakładce Rejon.</p>
+    `;
+  }
+
+  return { init: renderPrzebudowa };
 }

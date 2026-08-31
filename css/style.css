@@ -370,6 +370,43 @@ body {
   margin: 0.3rem 0;
 }
 
+/* fk-or-free / fk-multi (31.08.2026 — prawdziwe klucze obce w formularzu) */
+.fk-or-free-field label {
+  display: block;
+}
+
+.fk-or-free-field input[data-fk-free] {
+  margin-top: 0.4rem;
+}
+
+.fk-multi-field {
+  display: block;
+  margin-bottom: 0.9rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--navy);
+}
+
+.fk-multi-list {
+  background: var(--grey);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  margin-top: 0.3rem;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.fk-multi-row {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: normal;
+  padding: 0.3rem 0;
+}
+
+.fk-multi-row input {
+  margin-right: 0.4rem;
+}
+
 .section-switch-secondary {
   background: var(--grey-dark);
 }

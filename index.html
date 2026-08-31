@@ -129,6 +129,13 @@
       </label>
       <p id="sync-import-status" class="field-hint"></p>
     </div>
+
+    <div class="sync-block">
+      <h3>Kontrola integralności</h3>
+      <p class="field-hint">Sprawdza, czy klucze między tabelami (Rozdzielnia → Pole rozdzielcze → KB → Silniki/Czujniki) wskazują na istniejące rekordy, i szuka prawie identycznych nazw do scalenia. Uruchamia się automatycznie przy starcie appki (wynik widać tylko tutaj, jeśli coś znajdzie) — ten przycisk uruchamia to samo na żądanie.</p>
+      <button id="integrity-check-btn" class="btn-small">Uruchom pełną kontrolę teraz</button>
+      <div id="integrity-check-result"></div>
+    </div>
   </main>
 </section>
 

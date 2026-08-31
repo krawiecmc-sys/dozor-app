@@ -1,9 +1,59 @@
-import { exportAllData, importAllData, markExported } from './db.js';
+import { exportAllData, importAllData, markExported, sprawdzIntegralnosc } from './db.js';
+import { NADZOR_ENTITIES } from './nadzor-entities.js';
 
 const labelInput = document.getElementById('sync-export-label');
 const exportBtn = document.getElementById('sync-export-btn');
 const importInput = document.getElementById('sync-import-input');
 const statusEl = document.getElementById('sync-import-status');
+const integrityBtn = document.getElementById('integrity-check-btn');
+const integrityResultEl = document.getElementById('integrity-check-result');
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str ?? '';
+  return div.innerHTML;
+}
+
+// Uruchamia kontrolę integralności (patrz db.js/sprawdzIntegralnosc) i
+// renderuje wynik w sekcji Synchronizacji. Wołane automatycznie przy każdym
+// starcie appki (app.js/init) — "okresowa" samonaprawa w PWA bez backendu w
+// praktyce oznacza sprawdzenie na starcie + na żądanie z tego przycisku,
+// patrz komentarz w db.js.
+export async function runIntegrityCheck() {
+  const wyniki = await sprawdzIntegralnosc(NADZOR_ENTITIES);
+  const total = wyniki.osierocone.length + wyniki.niedopasowaneWolnyTekst.length + wyniki.mozliweDuplikaty.length;
+
+  if (total === 0) {
+    integrityResultEl.innerHTML = '<p class="field-hint">✓ Baza spójna — brak osieroconych referencji i podejrzanych duplikatów.</p>';
+    return wyniki;
+  }
+
+  const sekcja = (tytul, items, formatuj) =>
+    items.length
+      ? `<div class="nadzor-field"><span class="nadzor-field-label">${escapeHtml(tytul)} (${items.length}):</span>
+          <ul>${items.map((i) => `<li>${escapeHtml(formatuj(i))}</li>`).join('')}</ul>
+        </div>`
+      : '';
+
+  integrityResultEl.innerHTML = `
+    <div class="integrity-result">
+      ${sekcja('⚠ Osierocone referencje', wyniki.osierocone, (i) =>
+        `${i.store} #${i.id} (${i.nazwaRekordu || 'bez nazwy'}) — pole "${i.pole}" wskazuje na nieistniejący rekord #${i.brakujacyId} w ${i.refStore}`
+      )}
+      ${sekcja('Do sprawdzenia — wolny tekst bez dopasowania', wyniki.niedopasowaneWolnyTekst, (i) =>
+        `${i.store} #${i.id} (${i.nazwaRekordu || 'bez nazwy'}) — pole "${i.pole}" = "${i.wartosc}" nie pasuje do żadnego rekordu w ${i.refStore}`
+      )}
+      ${sekcja('Możliwe duplikaty (podobna nazwa)', wyniki.mozliweDuplikaty, (i) =>
+        `${i.store}: "${i.wartosc}" (#${i.id}) vs. #${i.innyId}`
+      )}
+    </div>
+  `;
+  return wyniki;
+}
+
+if (integrityBtn) {
+  integrityBtn.addEventListener('click', () => runIntegrityCheck());
+}
 
 function countRecords(data) {
   let total = 0;

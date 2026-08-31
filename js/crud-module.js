@@ -1,13 +1,18 @@
 // Generyczny moduł list+formularz (dodaj/edytuj/usuń) nad dowolnym zestawem
-// magazynów IndexedDB opisanych przez "entities". Używany przez Nadzór
-// rejonu, Przegląd i Diagnostykę — żeby nie duplikować tej samej logiki
+// magazynów IndexedDB opisanych przez "entities". Używany przez Rejon,
+// Przegląd i Diagnostykę — żeby nie duplikować tej samej logiki
 // listy/formularza za każdym razem.
 //
 // Pola formularza wspierają typy: text, number, select, date, datetime-local,
-// textarea, oraz "sublist" — edytowalna, powtarzalna lista zagnieżdżonych
+// textarea, "sublist" — edytowalna, powtarzalna lista zagnieżdżonych
 // rekordów (np. lista zabezpieczeń z datą legalizacji) przechowywana jako
 // tablica bezpośrednio w rekordzie nadrzędnym (bez osobnego magazynu —
-// wystarczające dla prototypu, prościej niż relacje 1:N w IndexedDB).
+// wystarczające dla prototypu, prościej niż relacje 1:N w IndexedDB), oraz
+// (31.08.2026, prawdziwe klucze obce zamiast dopasowania tekstu):
+//   - "fk-or-free": select z rekordami magazynu `f.refStore` (wartość =
+//     numeryczne id) + opcja "inny (wpisz ręcznie)" (wartość = string).
+//   - "fk-multi": lista checkboxów z rekordami `f.refStore`, wartość =
+//     tablica numerycznych id (relacja N:M).
 
 import { nadzorGetAll, nadzorAdd, nadzorUpdate, nadzorDelete, nadzorSeedExampleIfNeeded } from './db.js';
 
@@ -79,9 +84,46 @@ export function createCrudModule({ entities, examples = {}, tabsId, listId, form
     return `<div class="nadzor-field"><span class="nadzor-field-label">${escapeHtml(f.label)}:</span>${items}</div>`;
   }
 
+  async function fetchRefCache(def) {
+    const refCache = {};
+    for (const f of def.fields) {
+      if ((f.type === 'fk-or-free' || f.type === 'fk-multi') && !refCache[f.refStore]) {
+        const refRecords = await nadzorGetAll(f.refStore);
+        refCache[f.refStore] = new Map(refRecords.map((r) => [r.id, r]));
+      }
+    }
+    return refCache;
+  }
+
+  function renderFkOrFreeSummary(f, value, refCache) {
+    let display = '';
+    if (typeof value === 'number') {
+      const rec = refCache[f.refStore]?.get(value);
+      display = rec ? rec[f.refField] : `⚠ brak rekordu #${value} w ${f.refStore}`;
+    } else if (typeof value === 'string' && value) {
+      display = value;
+    }
+    if (!display) return '';
+    return `<div class="nadzor-field"><span class="nadzor-field-label">${escapeHtml(f.label)}:</span> ${escapeHtml(display)}</div>`;
+  }
+
+  function renderFkMultiSummary(f, valueArray, refCache) {
+    const ids = Array.isArray(valueArray) ? valueArray : [];
+    if (ids.length === 0) return '';
+    const labels = ids
+      .map((id) => {
+        const rec = refCache[f.refStore]?.get(id);
+        if (!rec) return `⚠ brak #${id}`;
+        return f.refLabelFields.map((k) => rec[k]).filter((v) => v !== undefined && v !== '' && v !== null).join(' ');
+      })
+      .join(', ');
+    return `<div class="nadzor-field"><span class="nadzor-field-label">${escapeHtml(f.label)}:</span> ${escapeHtml(labels)}</div>`;
+  }
+
   async function renderList() {
     const def = entities[currentEntity];
     const records = await nadzorGetAll(currentEntity);
+    const refCache = await fetchRefCache(def);
 
     if (records.length === 0) {
       listEl.innerHTML = '<p class="empty-state">Brak rekordów. Dodaj pierwszy.</p>';
@@ -94,6 +136,8 @@ export function createCrudModule({ entities, examples = {}, tabsId, listId, form
           .filter((f) => f.key !== def.titleField)
           .map((f) => {
             if (f.type === 'sublist') return renderSublistSummary(f, r[f.key]);
+            if (f.type === 'fk-or-free') return renderFkOrFreeSummary(f, r[f.key], refCache);
+            if (f.type === 'fk-multi') return renderFkMultiSummary(f, r[f.key], refCache);
             if (!r[f.key]) return '';
             return `<div class="nadzor-field"><span class="nadzor-field-label">${escapeHtml(f.label)}:</span> ${escapeHtml(r[f.key])}</div>`;
           })
@@ -151,6 +195,68 @@ export function createCrudModule({ entities, examples = {}, tabsId, listId, form
     const inputType = ['number', 'date', 'datetime-local'].includes(f.type) ? f.type : 'text';
     const listAttr = attrsOverride?.datalistId ? `list="${attrsOverride.datalistId}"` : '';
     return `<input type="${inputType}" ${nameAttr} ${extraAttr} ${listAttr} value="${escapeHtml(value)}" autocomplete="off">`;
+  }
+
+  function renderFkOrFreeEditor(f, value, refRecords) {
+    const isFree = typeof value === 'string' && value !== '';
+    const options = refRecords
+      .map((r) => `<option value="${r.id}" ${typeof value === 'number' && value === r.id ? 'selected' : ''}>${escapeHtml(r[f.refField])}</option>`)
+      .join('');
+    const hint = f.hint ? `<p class="field-hint">${escapeHtml(f.hint)}</p>` : '';
+    return `
+      <div class="form-field fk-or-free-field" data-fk-or-free="${f.key}">
+        <label>${escapeHtml(f.label)}${f.required ? ' *' : ''}</label>
+        <select data-fk-select="${f.key}">
+          <option value="">— wybierz —</option>
+          ${options}
+          <option value="__free__" ${isFree ? 'selected' : ''}>→ inny (wpisz ręcznie)</option>
+        </select>
+        <input type="text" data-fk-free="${f.key}" class="${isFree ? '' : 'hidden'}" value="${isFree ? escapeHtml(value) : ''}" placeholder="Wpisz nazwę ręcznie" autocomplete="off">
+        ${hint}
+      </div>
+    `;
+  }
+
+  function attachFkOrFreeHandlers(f) {
+    const select = formContainerEl.querySelector(`[data-fk-select="${f.key}"]`);
+    const freeInput = formContainerEl.querySelector(`[data-fk-free="${f.key}"]`);
+    select.addEventListener('change', () => {
+      if (select.value === '__free__') {
+        freeInput.classList.remove('hidden');
+        freeInput.focus();
+      } else {
+        freeInput.classList.add('hidden');
+      }
+    });
+  }
+
+  function readFkOrFreeValue(f) {
+    const select = formContainerEl.querySelector(`[data-fk-select="${f.key}"]`);
+    const freeInput = formContainerEl.querySelector(`[data-fk-free="${f.key}"]`);
+    if (select.value === '__free__') return freeInput.value.trim();
+    if (select.value === '') return '';
+    return Number(select.value);
+  }
+
+  function renderFkMultiEditor(f, valueArray, refRecords) {
+    const checked = new Set(Array.isArray(valueArray) ? valueArray : []);
+    const rows = refRecords
+      .map((r) => {
+        const label = f.refLabelFields.map((k) => r[k]).filter((v) => v !== undefined && v !== '' && v !== null).join(' — ');
+        return `<label class="fk-multi-row"><input type="checkbox" data-fk-multi="${f.key}" value="${r.id}" ${checked.has(r.id) ? 'checked' : ''}> ${escapeHtml(label || '(bez nazwy)')}</label>`;
+      })
+      .join('');
+    return `
+      <div class="form-field fk-multi-field">
+        <span>${escapeHtml(f.label)}</span>
+        <div class="fk-multi-list">${rows || '<p class="empty-state-small">Brak rekordów do wyboru — dodaj je najpierw w odpowiedniej zakładce.</p>'}</div>
+      </div>
+    `;
+  }
+
+  function readFkMultiValue(f) {
+    const boxes = formContainerEl.querySelectorAll(`[data-fk-multi="${f.key}"]:checked`);
+    return Array.from(boxes).map((b) => Number(b.value));
   }
 
   function renderSublistEditor(f) {
@@ -260,9 +366,21 @@ export function createCrudModule({ entities, examples = {}, tabsId, listId, form
       )
       .join('');
 
+    // Rekordy referencyjne dla fk-or-free / fk-multi (potrzebne do zbudowania
+    // opcji select/checkbox) — pobrane raz na pole, ten sam wzorzec co
+    // suggestionLists wyżej.
+    const refRecordsByField = {};
+    for (const f of def.fields) {
+      if (f.type === 'fk-or-free' || f.type === 'fk-multi') {
+        refRecordsByField[f.key] = await nadzorGetAll(f.refStore);
+      }
+    }
+
     const fieldsHtml = def.fields
       .map((f) => {
         if (f.type === 'sublist') return renderSublistEditor(f);
+        if (f.type === 'fk-or-free') return renderFkOrFreeEditor(f, record[f.key], refRecordsByField[f.key]);
+        if (f.type === 'fk-multi') return renderFkMultiEditor(f, record[f.key], refRecordsByField[f.key]);
 
         const value = record[f.key] ?? (!editingId && f.default ? f.default() : '');
         const hint = f.hint ? `<p class="field-hint">${escapeHtml(f.hint)}</p>` : '';
@@ -293,6 +411,7 @@ export function createCrudModule({ entities, examples = {}, tabsId, listId, form
 
     for (const f of def.fields) {
       if (f.type === 'sublist') attachSublistHandlers(f);
+      if (f.type === 'fk-or-free') attachFkOrFreeHandlers(f);
     }
 
     formContainerEl.querySelector('.crud-cancel').addEventListener('click', closeForm);
@@ -311,6 +430,14 @@ export function createCrudModule({ entities, examples = {}, tabsId, listId, form
           newRecord[f.key] = (sublistState[f.key] || []).filter((row) =>
             f.subFields.some((sf) => row[sf.key])
           );
+          continue;
+        }
+        if (f.type === 'fk-or-free') {
+          newRecord[f.key] = readFkOrFreeValue(f);
+          continue;
+        }
+        if (f.type === 'fk-multi') {
+          newRecord[f.key] = readFkMultiValue(f);
           continue;
         }
         const raw = formData.get(f.key);
