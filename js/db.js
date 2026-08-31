@@ -1,22 +1,26 @@
 const DB_NAME = 'dozor-baza-wiedzy';
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 const STORE = 'wiedza';
 const STORE_META = 'meta';
 const SEED_VERSION_KEY = 'seedVersion';
 
 // Magazyny "Rejonu" — dane operacyjne zakładowe, schemat przeprojektowany
 // 31.08.2026 z prawdziwymi kluczami obcymi zamiast dopasowania tekstu:
-// rozdzielnie -> poleRozdzielcze (miejsce_zabudowy, fk-or-free) -> kb
-// (silniki[]/czujniki[], fk-multi) -> silniki / czujniki. Magazyn
-// "Przeglądu" (bieżący + OUG/WUG) i magazyn "Diagnostyki" (baza + analiza)
-// bez zmian. Stare magazyny (przodki/kombajny/urzadzeniaRejonowe/
-// zabezpieczeniaKatalog/transformatory/chodnikiTrasy) świadomie usunięte —
-// patrz plan reorganizacji, sekcja "Co znika". W odróżnieniu od STORE
-// ("wiedza") te rekordy user tworzy/edytuje sam w appce — id nadawane
-// automatycznie (autoIncrement), nie z góry ustalone jak w seed-data.js.
+// rozdzielnie -> poleRozdzielcze (miejsce_zabudowy, fk-or-free) ->
+// transformatory (zasilany_z_pola, fk-or-free; dodane ponownie 31.08.2026
+// jako osobna tabela, na wyraźną prośbę usera po zobaczeniu Fazy 1-4) ->
+// kb (zasilany_z_transformatora, fk-or-free; silniki[]/czujniki[],
+// fk-multi) -> silniki / czujniki. Magazyn "Przeglądu" (bieżący + OUG/WUG)
+// i magazyn "Diagnostyki" (baza + analiza) bez zmian. Stare magazyny
+// (przodki/kombajny/urzadzeniaRejonowe/zabezpieczeniaKatalog/chodnikiTrasy)
+// świadomie usunięte — patrz plan reorganizacji, sekcja "Co znika". W
+// odróżnieniu od STORE ("wiedza") te rekordy user tworzy/edytuje sam w
+// appce — id nadawane automatycznie (autoIncrement), nie z góry ustalone
+// jak w seed-data.js.
 export const NADZOR_STORES = [
   'rozdzielnie',
   'poleRozdzielcze',
+  'transformatory',
   'kb',
   'czujniki',
   'silniki',
@@ -29,13 +33,16 @@ export const NADZOR_STORES = [
 // Stare nazwy magazynów z poprzedniego schematu (sprzed 31.08.2026) — appka
 // je jeszcze otwiera przy onupgradeneeded (żeby czyściście je skasować przy
 // pierwszym uruchomieniu nowej wersji), ale NIE są już częścią NADZOR_STORES
-// (eksport/import/samonaprawa ich nie dotyczą).
+// (eksport/import/samonaprawa ich nie dotyczą). "transformatory" USUNIĘTE z
+// tej listy 31.08.2026 (w tej samej sesji, kilka godzin później) — wraca
+// jako NOWY magazyn (inny schemat) w NADZOR_STORES powyżej, nie zostaje
+// tu podwójnie (stworzenie+natychmiastowe skasowanie w tym samym
+// onupgradeneeded byłoby błędem kolejności).
 const STARE_MAGAZYNY_DO_USUNIECIA = [
   'przodki',
   'kombajny',
   'urzadzeniaRejonowe',
   'zabezpieczeniaKatalog',
-  'transformatory',
   'chodnikiTrasy',
 ];
 

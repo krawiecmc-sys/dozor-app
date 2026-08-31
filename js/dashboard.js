@@ -60,9 +60,10 @@ function wskazujeNa(wartosc, rekordRodzica, poleWyswietlaneRodzica) {
 export async function renderDashboard(containerId, { onEditRecord } = {}) {
   const container = document.getElementById(containerId);
 
-  const [rozdzielnie, poleRozdzielcze, kb, silniki, czujniki] = await Promise.all([
+  const [rozdzielnie, poleRozdzielcze, transformatory, kb, silniki, czujniki] = await Promise.all([
     nadzorGetAll('rozdzielnie'),
     nadzorGetAll('poleRozdzielcze'),
+    nadzorGetAll('transformatory'),
     nadzorGetAll('kb'),
     nadzorGetAll('silniki'),
     nadzorGetAll('czujniki'),
@@ -71,7 +72,7 @@ export async function renderDashboard(containerId, { onEditRecord } = {}) {
   const silnikiById = new Map(silniki.map((s) => [s.id, s]));
   const czujnikiById = new Map(czujniki.map((c) => [c.id, c]));
 
-  const usedIds = { poleRozdzielcze: new Set(), kb: new Set(), silniki: new Set(), czujniki: new Set() };
+  const usedIds = { poleRozdzielcze: new Set(), transformatory: new Set(), kb: new Set(), silniki: new Set(), czujniki: new Set() };
 
   function renderSilnikiCzujnikiFor(kbRecord) {
     const silnikiHtml = (Array.isArray(kbRecord.silniki) ? kbRecord.silniki : [])
@@ -97,15 +98,29 @@ export async function renderDashboard(containerId, { onEditRecord } = {}) {
     return silnikiHtml + czujnikiHtml;
   }
 
-  function renderKbFor(poleRecord) {
+  function renderKbFor(transformatorRecord) {
     return kb
-      .filter((k) => wskazujeNa(k.zasilany_z_pola, poleRecord, 'p_nazwa'))
+      .filter((k) => wskazujeNa(k.zasilany_z_transformatora, transformatorRecord, 't_nr'))
       .map((k) => {
         usedIds.kb.add(k.id);
         return node(
           `${k.typ_kb ? k.typ_kb + ' — ' : ''}${k.kb_nazwa}`,
           { expired: hasExpiredZabezpieczenie(k.nastawy_zabezpieczen), entityKey: 'kb', id: k.id },
           renderSilnikiCzujnikiFor(k)
+        );
+      })
+      .join('');
+  }
+
+  function renderTransformatoryFor(poleRecord) {
+    return transformatory
+      .filter((t) => wskazujeNa(t.zasilany_z_pola, poleRecord, 'p_nazwa'))
+      .map((t) => {
+        usedIds.transformatory.add(t.id);
+        return node(
+          `Transformator ${t.t_nr}`,
+          { meta: t.t_napiecie || '', entityKey: 'transformatory', id: t.id },
+          renderKbFor(t)
         );
       })
       .join('');
@@ -119,7 +134,7 @@ export async function renderDashboard(containerId, { onEditRecord } = {}) {
         return node(
           p.p_nazwa,
           { meta: p.p_zasilane_z ? `zasilane z: ${p.p_zasilane_z}` : '', entityKey: 'poleRozdzielcze', id: p.id },
-          renderKbFor(p)
+          renderTransformatoryFor(p)
         );
       })
       .join('');
@@ -142,6 +157,7 @@ export async function renderDashboard(containerId, { onEditRecord } = {}) {
   // też były klikalne.
   const orphanGroups = [
     { label: 'Pola rozdzielcze', entityKey: 'poleRozdzielcze', records: poleRozdzielcze.filter((r) => !usedIds.poleRozdzielcze.has(r.id)), titleField: 'p_nazwa' },
+    { label: 'Transformatory', entityKey: 'transformatory', records: transformatory.filter((r) => !usedIds.transformatory.has(r.id)), titleField: 't_nr' },
     { label: 'KB', entityKey: 'kb', records: kb.filter((r) => !usedIds.kb.has(r.id)), titleField: 'kb_nazwa' },
     { label: 'Silniki (nieprzypisane do żadnego KB)', entityKey: 'silniki', records: silniki.filter((r) => !usedIds.silniki.has(r.id)), titleField: 'nazwa_silnika' },
     { label: 'Czujniki (nieprzypisane do żadnego KB)', entityKey: 'czujniki', records: czujniki.filter((r) => !usedIds.czujniki.has(r.id)), titleField: 'nazwa_czujnik' },

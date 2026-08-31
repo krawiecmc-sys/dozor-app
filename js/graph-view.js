@@ -13,9 +13,10 @@ import { nadzorGetAll } from './db.js';
 const TYPY = [
   { key: 'rozdzielnie', label: 'Rozdzielnia', titleField: 'nazwa_r', poziom: 0 },
   { key: 'poleRozdzielcze', label: 'Pole rozdzielcze', titleField: 'p_nazwa', poziom: 1 },
-  { key: 'kb', label: 'KB', titleField: 'kb_nazwa', poziom: 2 },
-  { key: 'silniki', label: 'Silnik', titleField: 'nazwa_silnika', poziom: 3 },
-  { key: 'czujniki', label: 'Czujnik', titleField: 'nazwa_czujnik', poziom: 3 },
+  { key: 'transformatory', label: 'Transformator', titleField: 't_nr', poziom: 2 },
+  { key: 'kb', label: 'KB', titleField: 'kb_nazwa', poziom: 3 },
+  { key: 'silniki', label: 'Silnik', titleField: 'nazwa_silnika', poziom: 4 },
+  { key: 'czujniki', label: 'Czujnik', titleField: 'nazwa_czujnik', poziom: 4 },
 ];
 
 const WEZEL_SZEROKOSC = 190;
@@ -72,14 +73,15 @@ export function createGraphView(containerId) {
   }
 
   async function wczytajDane() {
-    const [rozdzielnie, poleRozdzielcze, kb, silniki, czujniki] = await Promise.all([
+    const [rozdzielnie, poleRozdzielcze, transformatory, kb, silniki, czujniki] = await Promise.all([
       nadzorGetAll('rozdzielnie'),
       nadzorGetAll('poleRozdzielcze'),
+      nadzorGetAll('transformatory'),
       nadzorGetAll('kb'),
       nadzorGetAll('silniki'),
       nadzorGetAll('czujniki'),
     ]);
-    dane = { rozdzielnie, poleRozdzielcze, kb, silniki, czujniki };
+    dane = { rozdzielnie, poleRozdzielcze, transformatory, kb, silniki, czujniki };
   }
 
   // Rodzice DANEGO węzła spośród węzłów już obecnych na płótnie (patrz
@@ -93,11 +95,17 @@ export function createGraphView(containerId) {
         const r = znajdzRekord('rozdzielnie', w.id);
         if (r && wskazujeNa(rekord.miejsce_zabudowy, r, 'nazwa_r')) rodzice.push(w);
       }
-    } else if (typ === 'kb') {
+    } else if (typ === 'transformatory') {
       for (const w of platno) {
         if (w.typ !== 'poleRozdzielcze') continue;
         const r = znajdzRekord('poleRozdzielcze', w.id);
         if (r && wskazujeNa(rekord.zasilany_z_pola, r, 'p_nazwa')) rodzice.push(w);
+      }
+    } else if (typ === 'kb') {
+      for (const w of platno) {
+        if (w.typ !== 'transformatory') continue;
+        const r = znajdzRekord('transformatory', w.id);
+        if (r && wskazujeNa(rekord.zasilany_z_transformatora, r, 't_nr')) rodzice.push(w);
       }
     } else if (typ === 'silniki' || typ === 'czujniki') {
       for (const w of platno) {
@@ -144,7 +152,8 @@ export function createGraphView(containerId) {
     const def = TYPY.find((t) => t.key === typ);
     const tytul = rekord[def.titleField] || '(bez nazwy)';
     let detale = '';
-    if (typ === 'kb') detale = rekord.typ_kb || '';
+    if (typ === 'transformatory') detale = rekord.t_napiecie || '';
+    else if (typ === 'kb') detale = rekord.typ_kb || '';
     else if (typ === 'silniki') detale = [rekord.s_moc ? `${rekord.s_moc} kW` : '', rekord.napiecie_zas, rekord.s_rodzaj].filter(Boolean).join(' · ');
     else if (typ === 'czujniki') detale = rekord.opis || '';
     else if (typ === 'rozdzielnie') detale = rekord.pole_nr ? `pole nr ${rekord.pole_nr}` : '';

@@ -67,6 +67,30 @@ export const NADZOR_ENTITIES = {
       },
     ],
   },
+  // Dodane ponownie 31.08.2026 jako osobna tabela, na wyraźną prośbę usera
+  // (wcześniej w tej samej sesji rola transformatora zakładała się mieścić
+  // w parze Rozdzielnia -> Pole_rozdzielcze). Miejsce w łańcuchu takie samo
+  // jak w oryginalnym, sprzed-reorganizacji schemacie: Pole rozdzielcze ->
+  // Transformator -> (teraz) KB, zamiast Pole rozdzielcze -> Urządzenie.
+  transformatory: {
+    label: 'Transformatory',
+    labelSingular: 'transformator',
+    titleField: 't_nr',
+    fields: [
+      { key: 't_nr', label: 'Nr transformatora', type: 'text', required: true },
+      { key: 't_napiecie', label: 'Napięcie', type: 'select', options: ['6/1 kV', '6/0,5 kV', '6/0,5/1 kV'] },
+      { key: 't_nastawa_zabezpieczen', label: 'Nastawa zabezpieczeń', type: 'text' },
+      { key: 't_obciazenie', label: 'Wartość obciążeniowa', type: 'text' },
+      {
+        key: 'zasilany_z_pola',
+        label: 'Zasilany z (pole rozdzielcze)',
+        type: 'fk-or-free',
+        refStore: 'poleRozdzielcze',
+        refField: 'p_nazwa',
+        hint: 'Wybierz z listy istniejących pól rozdzielczych albo wpisz nazwę ręcznie.',
+      },
+    ],
+  },
   kb: {
     label: 'KB',
     labelSingular: 'maszyna urabiająca (KB)',
@@ -75,16 +99,16 @@ export const NADZOR_ENTITIES = {
       { key: 'typ_kb', label: 'Typ', type: 'select', options: ['ścianowy', 'przodkowy', 'spągoładowarka'], required: true },
       { key: 'kb_nazwa', label: 'Nazwa / numer', type: 'text', required: true },
       {
-        // Dopisane względem literalnej listy usera — bez tego pola KB nie
-        // miałoby żadnego realnego połączenia z Pole_rozdzielcze, a cały
-        // łańcuch zasilania (Rozdzielnia -> Pole_rozdzielcze -> KB) nie
-        // dałby się odtworzyć na dashboardzie ani na widoku graficznym.
-        key: 'zasilany_z_pola',
-        label: 'Zasilany z (pole rozdzielcze)',
+        // 31.08.2026: przełączone z bezpośredniego zasilania z Pola
+        // rozdzielczego na zasilanie z Transformatora, po dopisaniu
+        // Transformatora jako osobnej tabeli między Polem a KB — bez tego
+        // pola KB nie miałoby żadnego realnego połączenia w górę łańcucha.
+        key: 'zasilany_z_transformatora',
+        label: 'Zasilany z (transformator)',
         type: 'fk-or-free',
-        refStore: 'poleRozdzielcze',
-        refField: 'p_nazwa',
-        hint: 'Wybierz z listy istniejących pól rozdzielczych albo wpisz nazwę ręcznie.',
+        refStore: 'transformatory',
+        refField: 't_nr',
+        hint: 'Wybierz z listy istniejących transformatorów albo wpisz nr ręcznie.',
       },
       {
         key: 'silniki',
@@ -137,7 +161,7 @@ export const NADZOR_ENTITIES = {
         key: 'typObiektu',
         label: 'Typ obiektu',
         type: 'select',
-        options: ['Rozdzielnia', 'Pole rozdzielcze', 'KB', 'Silnik', 'Czujnik'],
+        options: ['Rozdzielnia', 'Pole rozdzielcze', 'Transformator', 'KB', 'Silnik', 'Czujnik'],
       },
       { key: 'obiekt', label: 'Obiekt (nr / nazwa)', type: 'text', required: true },
       { key: 'wynik', label: 'Wynik', type: 'select', options: ['OK', 'Usterka', 'Do ponownego sprawdzenia'] },
@@ -167,10 +191,17 @@ export const NADZOR_EXAMPLES = {
     zabezpieczenia_nastawy: 'do uzupełnienia',
     miejsce_zabudowy: 'PRZYKŁAD — R-1',
   },
+  transformatory: {
+    t_nr: 'PRZYKŁAD-T1',
+    t_napiecie: '6/1 kV',
+    t_nastawa_zabezpieczen: 'do uzupełnienia',
+    t_obciazenie: 'do uzupełnienia',
+    zasilany_z_pola: 'PRZYKŁAD — pole rozdzielcze',
+  },
   kb: {
     typ_kb: 'ścianowy',
     kb_nazwa: 'PRZYKŁAD — AM-1',
-    zasilany_z_pola: 'PRZYKŁAD — pole rozdzielcze',
+    zasilany_z_transformatora: 'PRZYKŁAD-T1',
     silniki: [],
     czujniki: [],
     nastawy_zabezpieczen: [{ nazwa: 'PRZYKŁAD — zabezpieczenie', nastawa: 'do uzupełnienia', legalizacja: '' }],
