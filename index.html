@@ -45,6 +45,7 @@
 <section id="section-dashboard">
   <nav id="nadzor-sub-switch" class="section-switch section-switch-secondary">
     <button class="section-btn active" data-sub="dashboard">Mapa rejonu</button>
+    <button class="section-btn" data-sub="graf">Graf zasilania</button>
     <button class="section-btn" data-sub="crud">Rejon</button>
     <button class="section-btn" data-sub="ougwug">Przegląd OUG/WUG</button>
     <button class="section-btn" data-sub="diagnostyka">Diagnostyka</button>
@@ -70,6 +71,10 @@
     <main id="dashboard-content">
       <div id="dashboard-container"></div>
     </main>
+  </div>
+
+  <div id="nadzor-graf-area" class="hidden">
+    <main id="graf-content"></main>
   </div>
 
   <div id="nadzor-diagnostyka-area" class="hidden">

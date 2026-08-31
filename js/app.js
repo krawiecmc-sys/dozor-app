@@ -6,9 +6,12 @@ import { initDiagnostyka, refreshDiagnostyka } from './diagnostyka.js';
 import { initSync, runIntegrityCheck } from './sync.js';
 import { checkExportReminder } from './export-reminder.js';
 import { renderDashboard } from './dashboard.js';
+import { createGraphView } from './graph-view.js';
 // Kreator łańcucha (chain-builder.js) usunięty 31.08.2026 (Faza 2 reorganizacji)
 // — odwoływał się do starego schematu, zastąpiony formularzami z realnymi
-// kluczami (Faza 1) i docelowo widokiem graficznym (Faza 4).
+// kluczami (Faza 1) i widokiem graficznym poniżej (Faza 4).
+
+const graphView = createGraphView('graf-content');
 
 // Kategorie "Wszystko"/"Normy techniczne"/"Schematy uniwersalne" usunięte
 // z nawigacji 31.08.2026 (na wyraźną prośbę — mniej odnośników do
@@ -261,6 +264,13 @@ async function refreshActiveNadzorSub() {
         await editNadzorRecord(entityKey, id);
       },
     });
+  } else if (nadzorActiveSub === 'graf') {
+    await graphView.init({
+      onEditRecord: async (entityKey, id) => {
+        switchNadzorSub('crud');
+        await editNadzorRecord(entityKey, id);
+      },
+    });
   } else if (nadzorActiveSub === 'diagnostyka') {
     await refreshDiagnostyka();
   } else {
@@ -297,11 +307,13 @@ const nadzorCrudAreaEl = document.getElementById('nadzor-crud-area');
 const nadzorOugwugAreaEl = document.getElementById('nadzor-ougwug-area');
 const nadzorDashboardAreaEl = document.getElementById('nadzor-dashboard-area');
 const nadzorDiagnostykaAreaEl = document.getElementById('nadzor-diagnostyka-area');
+const nadzorGrafAreaEl = document.getElementById('nadzor-graf-area');
 const nadzorSubAreas = {
   crud: nadzorCrudAreaEl,
   ougwug: nadzorOugwugAreaEl,
   dashboard: nadzorDashboardAreaEl,
   diagnostyka: nadzorDiagnostykaAreaEl,
+  graf: nadzorGrafAreaEl,
 };
 
 // Wspólna funkcja do przełączania pod-widoku Nadzoru rejonu — używana

@@ -407,6 +407,112 @@ body {
   margin-right: 0.4rem;
 }
 
+/* Graf zasilania (31.08.2026, Faza 4 reorganizacji) */
+.graph-toolbar {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  flex-wrap: wrap;
+}
+
+.graph-picker {
+  background: var(--navy-light);
+  padding: 0.75rem 1rem;
+}
+
+.graph-picker-group {
+  margin-bottom: 0.75rem;
+}
+
+.graph-picker-group:last-child {
+  margin-bottom: 0;
+}
+
+.graph-picker-group h4 {
+  color: var(--grey);
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin: 0 0 0.4rem 0;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.graph-picker-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+#graph-canvas-wrap {
+  position: relative;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 1rem;
+}
+
+#graph-arrows {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  pointer-events: none;
+}
+
+#graph-nodes {
+  position: relative;
+}
+
+.graph-node {
+  position: absolute;
+  background: var(--white);
+  border: 1px solid var(--grey);
+  border-left: 4px solid var(--accent);
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+  box-shadow: 0 1px 3px rgba(11, 31, 51, 0.15);
+  cursor: pointer;
+}
+
+.graph-node-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.graph-node-typ {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--grey-dark);
+}
+
+.graph-node-remove {
+  border: none;
+  background: transparent;
+  color: var(--grey-dark);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.2rem;
+}
+
+.graph-node-remove:hover {
+  color: var(--danger);
+}
+
+.graph-node-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--navy);
+  margin-top: 0.15rem;
+}
+
+.graph-node-detale {
+  font-size: 0.78rem;
+  color: var(--grey-dark);
+  margin-top: 0.15rem;
+}
+
 .section-switch-secondary {
   background: var(--grey-dark);
 }
