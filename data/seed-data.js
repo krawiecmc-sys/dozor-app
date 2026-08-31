@@ -7,7 +7,7 @@
 
 // Podbij przy każdej zmianie treści poniżej — to wymusza odświeżenie
 // lokalnej bazy na telefonie (patrz reseedIfNeeded w js/db.js).
-export const SEED_VERSION = '2026-08-02-04';
+export const SEED_VERSION = '2026-08-31-05';
 
 // Rekordy kategorii "Przepisy prawne" (górnictwo) oparte na kuratorowanym
 // wyciągu z D:\obsidian_1\gornictwo_przepisy_normy.md (stan prawny
@@ -138,7 +138,9 @@ export const seedData = [
   },
   {
     id: 'normy-pn-hd-60364-6',
-    category: 'normy',
+    // Kategoria "normy" usunięta z nawigacji 31.08.2026 (Faza 2 reorganizacji,
+    // na wyraźną prośbę) — treść przeniesiona do "dokumentacja", zachowana bez zmian.
+    category: 'dokumentacja',
     title: 'PN-HD 60364-6 — sprawdzanie i pomiary okresowe instalacji elektrycznych nn',
     tags: ['norma', 'pomiary okresowe', 'instalacje elektryczne', 'PN-HD'],
     source: 'PN-HD 60364-6:2016-07 „Instalacje elektryczne niskiego napięcia — Część 6: Sprawdzanie", w powiązaniu z art. 62 ustawy Prawo budowlane',
@@ -160,7 +162,9 @@ export const seedData = [
   },
   {
     id: 'schematy-symbole-pn-en-60617',
-    category: 'schematy',
+    // Kategoria "schematy" usunięta z nawigacji 31.08.2026 (Faza 2 reorganizacji,
+    // na wyraźną prośbę) — treść przeniesiona do "dokumentacja", zachowana bez zmian.
+    category: 'dokumentacja',
     title: 'Legenda podstawowych symboli elektrycznych wg PN-EN 60617 (IEC 60617)',
     tags: ['symbole', 'schematy', 'PN-EN 60617'],
     source: 'PN-EN 60617 (polska wersja normy EN 60617, identyczna z IEC 60617)',

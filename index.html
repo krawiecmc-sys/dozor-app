@@ -37,18 +37,17 @@
 </div>
 
 <nav id="section-switch" class="section-switch">
-  <button class="section-btn active" data-section="nadzor">Nadzór rejonu</button>
-  <button class="section-btn" data-section="diagnostyka">Diagnostyka</button>
+  <button class="section-btn active" data-section="dashboard">Dashboard</button>
   <button class="section-btn" data-section="wiedza">Baza wiedzy</button>
   <button class="section-btn" data-section="sync">Synchronizacja</button>
 </nav>
 
-<section id="section-nadzor">
+<section id="section-dashboard">
   <nav id="nadzor-sub-switch" class="section-switch section-switch-secondary">
-    <button class="section-btn active" data-sub="dashboard">Dashboard</button>
-    <button class="section-btn" data-sub="chain">Kreator łańcucha</button>
-    <button class="section-btn" data-sub="crud">Sprzęt i przegląd bieżący</button>
+    <button class="section-btn active" data-sub="dashboard">Mapa rejonu</button>
+    <button class="section-btn" data-sub="crud">Rejon</button>
     <button class="section-btn" data-sub="ougwug">Przegląd OUG/WUG</button>
+    <button class="section-btn" data-sub="diagnostyka">Diagnostyka</button>
   </nav>
 
   <div id="nadzor-crud-area" class="hidden">
@@ -73,29 +72,20 @@
     </main>
   </div>
 
-  <div id="nadzor-chain-area" class="hidden">
-    <main id="chain-content">
-      <div id="chain-container"></div>
+  <div id="nadzor-diagnostyka-area" class="hidden">
+    <nav id="diagnostyka-entity-tabs" class="category-filter"></nav>
+    <main id="diagnostyka-content">
+      <div id="diagnostyka-list-container"></div>
+      <button id="diagnostyka-add-btn" class="btn-primary btn-add">+ Dodaj</button>
+      <div id="diagnostyka-form-container" class="hidden"></div>
     </main>
   </div>
 </section>
 
-<section id="section-diagnostyka" class="hidden">
-  <nav id="diagnostyka-entity-tabs" class="category-filter"></nav>
-  <main id="diagnostyka-content">
-    <div id="diagnostyka-list-container"></div>
-    <button id="diagnostyka-add-btn" class="btn-primary btn-add">+ Dodaj</button>
-    <div id="diagnostyka-form-container" class="hidden"></div>
-  </main>
-</section>
-
 <section id="section-wiedza" class="hidden">
   <nav id="category-filter" class="category-filter">
-    <button class="chip active" data-category="all">Wszystko</button>
-    <button class="chip" data-category="przepisy">Przepisy prawne</button>
-    <button class="chip" data-category="normy">Normy techniczne</button>
+    <button class="chip active" data-category="przepisy">Przepisy prawne</button>
     <button class="chip" data-category="wzory">Wzory dokumentów</button>
-    <button class="chip" data-category="schematy">Schematy uniwersalne</button>
     <button class="chip" data-category="dokumentacja">Dokumentacja techniczna</button>
     <button class="chip" data-category="urzadzenia">Urządzenia</button>
   </nav>

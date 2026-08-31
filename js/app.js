@@ -6,15 +6,19 @@ import { initDiagnostyka, refreshDiagnostyka } from './diagnostyka.js';
 import { initSync, runIntegrityCheck } from './sync.js';
 import { checkExportReminder } from './export-reminder.js';
 import { renderDashboard } from './dashboard.js';
-import { createChainBuilder } from './chain-builder.js';
+// Kreator łańcucha (chain-builder.js) usunięty 31.08.2026 (Faza 2 reorganizacji)
+// — odwoływał się do starego schematu, zastąpiony formularzami z realnymi
+// kluczami (Faza 1) i docelowo widokiem graficznym (Faza 4).
 
-const chainBuilder = createChainBuilder('chain-container');
-
+// Kategorie "Wszystko"/"Normy techniczne"/"Schematy uniwersalne" usunięte
+// z nawigacji 31.08.2026 (na wyraźną prośbę — mniej odnośników do
+// dokumentacji). Istniejące rekordy tych dwóch kategorii przeniesione do
+// "dokumentacja" w data/seed-data.js, treść zachowana. "all" NIE jest już
+// domyślnym stanem filtra (patrz `state` niżej) — pierwsza realna kategoria
+// przejęła tę rolę, żeby stan JS zgadzał się z wizualnie aktywnym chipem.
 const CATEGORY_LABELS = {
   przepisy: 'Przepisy prawne',
-  normy: 'Normy techniczne',
   wzory: 'Wzory dokumentów',
-  schematy: 'Schematy uniwersalne',
   dokumentacja: 'Dokumentacja techniczna',
   urzadzenia: 'Urządzenia',
 };
@@ -31,7 +35,7 @@ const wiedzaAddBtn = document.getElementById('wiedza-add-btn');
 const wiedzaFormEl = document.getElementById('wiedza-form-container');
 
 let allRecords = [];
-let state = { category: 'all', query: '' };
+let state = { category: 'przepisy', query: '' };
 
 function escapeHtml(str) {
   const div = document.createElement('div');
@@ -235,15 +239,16 @@ function updateOfflineIndicator() {
 
 const sectionSwitchEl = document.getElementById('section-switch');
 const sectionEls = {
-  nadzor: document.getElementById('section-nadzor'),
-  diagnostyka: document.getElementById('section-diagnostyka'),
+  dashboard: document.getElementById('section-dashboard'),
   wiedza: document.getElementById('section-wiedza'),
   sync: document.getElementById('section-sync'),
 };
 
-// Aktualny pod-widok Nadzoru rejonu — potrzebny, żeby wiedzieć, co
-// odświeżyć, gdy user wraca na zakładkę "Nadzór rejonu" z innej sekcji.
-// Dashboard jest domyślnym widokiem startowym (patrz index.html).
+// Aktualny pod-widok Dashboardu — potrzebny, żeby wiedzieć, co odświeżyć,
+// gdy user wraca na zakładkę "Dashboard" z innej sekcji. Mapa rejonu (dawny
+// "Nadzór rejonu" / dashboard-container) jest domyślnym widokiem startowym
+// (patrz index.html). Diagnostyka i Przegląd OUG/WUG złączone tu 31.08.2026
+// (Faza 2 reorganizacji) — wcześniej Diagnostyka była osobną sekcją top-level.
 let nadzorActiveSub = 'dashboard';
 
 async function refreshActiveNadzorSub() {
@@ -256,8 +261,8 @@ async function refreshActiveNadzorSub() {
         await editNadzorRecord(entityKey, id);
       },
     });
-  } else if (nadzorActiveSub === 'chain') {
-    await chainBuilder.init();
+  } else if (nadzorActiveSub === 'diagnostyka') {
+    await refreshDiagnostyka();
   } else {
     await refreshNadzor();
   }
@@ -279,10 +284,8 @@ sectionSwitchEl.addEventListener('click', async (event) => {
   // Wymuś ponowne pobranie danych z IndexedDB przy każdym wejściu na
   // zakładkę — zamiast ufać, że to, co zostało wyrenderowane wcześniej,
   // jest wciąż aktualne.
-  if (active === 'nadzor') {
+  if (active === 'dashboard') {
     await refreshActiveNadzorSub();
-  } else if (active === 'diagnostyka') {
-    await refreshDiagnostyka();
   } else if (active === 'wiedza') {
     await refreshRecords();
     renderList();
@@ -293,12 +296,12 @@ const nadzorSubSwitchEl = document.getElementById('nadzor-sub-switch');
 const nadzorCrudAreaEl = document.getElementById('nadzor-crud-area');
 const nadzorOugwugAreaEl = document.getElementById('nadzor-ougwug-area');
 const nadzorDashboardAreaEl = document.getElementById('nadzor-dashboard-area');
-const nadzorChainAreaEl = document.getElementById('nadzor-chain-area');
+const nadzorDiagnostykaAreaEl = document.getElementById('nadzor-diagnostyka-area');
 const nadzorSubAreas = {
   crud: nadzorCrudAreaEl,
   ougwug: nadzorOugwugAreaEl,
   dashboard: nadzorDashboardAreaEl,
-  chain: nadzorChainAreaEl,
+  diagnostyka: nadzorDiagnostykaAreaEl,
 };
 
 // Wspólna funkcja do przełączania pod-widoku Nadzoru rejonu — używana
