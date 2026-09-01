@@ -44,8 +44,29 @@ export const NADZOR_ENTITIES = {
     fields: [
       { key: 'nazwa_r', label: 'Nazwa rozdzielni', type: 'text', required: true },
       { key: 'pole_nr', label: 'Nr pola (rejonu górniczego)', type: 'text', hint: 'Numer pola/rejonu górniczego, w którym stoi ta rozdzielnia — nie mylić z elektrycznym "Polem rozdzielczym" poniżej.' },
-      { key: 'r_zasilana_z_glowne', label: 'Zasilana z — główne', type: 'text' },
-      { key: 'r_zasilana_z_rezerwowe', label: 'Zasilana z — rezerwowe/awaryjne', type: 'text' },
+      // 01.09.2026: z wolnego tekstu na fk-or-free (self-referencja do innej
+      // Rozdzielni) — user potwierdził wprost. Każda rozdzielnia ma DWA
+      // niezależne zasilania; oba pola są informacyjne/dla Grafu zasilania
+      // (rysują strzałki między rozdzielniami), NIE sterują strukturą drzewa
+      // Mapy rejonu — dashboard.js świadomie zostawia wszystkie Rozdzielnie
+      // jako korzenie drzewa (dwa możliwe rodzice nie dają się czysto
+      // zagnieździć w drzewie bez duplikowania poddrzewa — patrz plan sesji).
+      {
+        key: 'r_zasilana_z_glowne',
+        label: 'Zasilana z — główne',
+        type: 'fk-or-free',
+        refStore: 'rozdzielnie',
+        refField: 'nazwa_r',
+        hint: 'Wybierz z listy istniejących rozdzielni albo wpisz ręcznie, jeśli źródło jest poza tą bazą (np. przyłącze zewnętrzne kopalni).',
+      },
+      {
+        key: 'r_zasilana_z_rezerwowe',
+        label: 'Zasilana z — rezerwowe/awaryjne',
+        type: 'fk-or-free',
+        refStore: 'rozdzielnie',
+        refField: 'nazwa_r',
+        hint: 'Wybierz z listy istniejących rozdzielni albo wpisz ręcznie, jeśli źródło jest poza tą bazą.',
+      },
     ],
   },
   poleRozdzielcze: {
@@ -91,6 +112,48 @@ export const NADZOR_ENTITIES = {
       },
     ],
   },
+  // Dodane 01.09.2026 — sprzęt kopalniany (wyłączniki, szafy stycznikowe,
+  // agregaty, pompy, zespoły transformatorowe, wentylatory, wiertnice).
+  // W odróżnieniu od KB (zawsze zasilane z transformatora), Urządzenie bywa
+  // zasilane BEZPOŚREDNIO z transformatora ALBO z innego urządzenia (łańcuch
+  // urządzenie -> urządzenie) — stąd DWA osobne pola fk-or-free zamiast
+  // jednego z wieloma refStore na raz (to drugie wymagałoby zmiany silnika
+  // crud-module.js współdzielonego przez WSZYSTKIE encje — wyższe ryzyko
+  // regresji). W praktyce user wypełnia tylko JEDNO z tych dwóch pól.
+  // UWAGA (znane, świadomie zaakceptowane ograniczenie): pole
+  // 'zasilane_z_urzadzenia' jest self-referencją (refStore: 'urzadzenia').
+  // crud-module.js nie wyklucza aktualnie edytowanego rekordu z listy wyboru
+  // w fk-or-free, więc formularz nie blokuje wybrania urządzenia jako
+  // zasilającego samo siebie ani pętli A->B->A. dashboard.js ma na to
+  // zabezpieczenie przy renderowaniu (ancestorIds-guard w renderUrzadzeniaFor).
+  urzadzenia: {
+    label: 'Urządzenia',
+    labelSingular: 'urządzenie',
+    titleField: 'nazwa',
+    fields: [
+      { key: 'nazwa', label: 'Nazwa / oznaczenie urządzenia', type: 'text', required: true },
+      { key: 'symbol', label: 'Symbol', type: 'text' },
+      { key: 'moc', label: 'Moc (kW)', type: 'number' },
+      { key: 'nap_zas', label: 'Napięcie zasilania', type: 'select', options: ['0,5 kV', '1 kV', '6 kV'] },
+      {
+        key: 'zasilane_z_transformatora',
+        label: 'Zasilane z (transformator)',
+        type: 'fk-or-free',
+        refStore: 'transformatory',
+        refField: 't_nr',
+        hint: 'Wypełnij TO pole, jeśli urządzenie jest zasilane bezpośrednio z transformatora. Jeśli jest zasilane z innego urządzenia — zostaw puste i użyj pola poniżej.',
+      },
+      {
+        key: 'zasilane_z_urzadzenia',
+        label: 'Zasilane z (inne urządzenie)',
+        type: 'fk-or-free',
+        refStore: 'urzadzenia',
+        refField: 'nazwa',
+        hint: 'Wypełnij TO pole, jeśli urządzenie jest zasilane z innego urządzenia (np. pompa z szafy stycznikowej), a nie bezpośrednio z transformatora.',
+      },
+      { key: 'nastawy_zabezpieczen', label: 'Nastawy zabezpieczeń', type: 'sublist', subFields: ZABEZPIECZENIA_SUBFIELDS },
+    ],
+  },
   kb: {
     label: 'KB',
     labelSingular: 'maszyna urabiająca (KB)',
@@ -109,6 +172,17 @@ export const NADZOR_ENTITIES = {
         refStore: 'transformatory',
         refField: 't_nr',
         hint: 'Wybierz z listy istniejących transformatorów albo wpisz nr ręcznie.',
+      },
+      {
+        // 01.09.2026: KB może też wisieć na końcu łańcucha Urządzeń
+        // (Transformator -> Urządzenie -> ... -> KB), nie tylko bezpośrednio
+        // na Transformatorze — patrz komentarz przy encji "urzadzenia" wyżej.
+        key: 'zasilany_z_urzadzenia',
+        label: 'Zasilany z (inne urządzenie)',
+        type: 'fk-or-free',
+        refStore: 'urzadzenia',
+        refField: 'nazwa',
+        hint: 'Wypełnij TO pole, jeśli KB jest zasilane z urządzenia pośredniego (np. szafy stycznikowej), a nie bezpośrednio z transformatora. Jeśli zasilane bezpośrednio z transformatora — użyj pola powyżej.',
       },
       {
         key: 'silniki',
@@ -161,7 +235,7 @@ export const NADZOR_ENTITIES = {
         key: 'typObiektu',
         label: 'Typ obiektu',
         type: 'select',
-        options: ['Rozdzielnia', 'Pole rozdzielcze', 'Transformator', 'KB', 'Silnik', 'Czujnik'],
+        options: ['Rozdzielnia', 'Pole rozdzielcze', 'Transformator', 'Urządzenie', 'KB', 'Silnik', 'Czujnik'],
       },
       { key: 'obiekt', label: 'Obiekt (nr / nazwa)', type: 'text', required: true },
       { key: 'wynik', label: 'Wynik', type: 'select', options: ['OK', 'Usterka', 'Do ponownego sprawdzenia'] },
@@ -198,10 +272,20 @@ export const NADZOR_EXAMPLES = {
     t_obciazenie: 'do uzupełnienia',
     zasilany_z_pola: 'PRZYKŁAD — pole rozdzielcze',
   },
+  urzadzenia: {
+    nazwa: 'PRZYKŁAD — wyłącznik W-12',
+    symbol: 'W-12',
+    moc: 0,
+    nap_zas: '6 kV',
+    zasilane_z_transformatora: 'PRZYKŁAD-T1',
+    zasilane_z_urzadzenia: '',
+    nastawy_zabezpieczen: [{ nazwa: 'PRZYKŁAD — zabezpieczenie', nastawa: 'do uzupełnienia', legalizacja: '' }],
+  },
   kb: {
     typ_kb: 'ścianowy',
     kb_nazwa: 'PRZYKŁAD — AM-1',
     zasilany_z_transformatora: 'PRZYKŁAD-T1',
+    zasilany_z_urzadzenia: '',
     silniki: [],
     czujniki: [],
     nastawy_zabezpieczen: [{ nazwa: 'PRZYKŁAD — zabezpieczenie', nastawa: 'do uzupełnienia', legalizacja: '' }],

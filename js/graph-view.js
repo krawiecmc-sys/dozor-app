@@ -7,16 +7,32 @@
 // o klikalność/dostępność/zawijanie tekstu niż w <canvas> albo <foreignObject>).
 // Kolejność dodawania NIE ma znaczenia — krawędzie liczone są na nowo przy
 // każdej zmianie płótna, dla WSZYSTKICH par węzłów na płótnie jednocześnie.
+//
+// 01.09.2026: dołożone Urządzenia — jeden typ węzła może mieć DWA różne
+// możliwe typy rodzica (Urządzenie: Transformator ALBO inne Urządzenie;
+// KB: Transformator ALBO Urządzenie; Rozdzielnia: inna Rozdzielnia,
+// główne/rezerwowe). Self-referencje (Urządzenie, Rozdzielnia) mają guard
+// przeciw strzałce węzła do samego siebie w znajdzRodzicowNaPlotnie —
+// architektura już wspiera węzeł z wieloma rodzicami (rodzice to tablica),
+// więc nic więcej nie było potrzebne.
 
 import { nadzorGetAll } from './db.js';
 
+// 01.09.2026: dołożone Urządzenia (poziom 3) między Transformator i KB —
+// KB dostało drugie, opcjonalne pole zasilania (zasilany_z_urzadzenia), więc
+// jego poziom przesunięty z 3 na 4 (i silniki/czujniki z 4 na 5), żeby
+// KB-zasilane-z-Urządzenia mogło stanąć wizualnie NIŻEJ niż Urządzenie
+// zamiast w tym samym rzędzie. Bezpośredni przypadek Transformator->KB (bez
+// pośredniego Urządzenia, najczęstszy w bazie) dostaje wtedy "pusty" rząd 3
+// między nimi — kosmetyczna, nieszkodliwa luka.
 const TYPY = [
   { key: 'rozdzielnie', label: 'Rozdzielnia', titleField: 'nazwa_r', poziom: 0 },
   { key: 'poleRozdzielcze', label: 'Pole rozdzielcze', titleField: 'p_nazwa', poziom: 1 },
   { key: 'transformatory', label: 'Transformator', titleField: 't_nr', poziom: 2 },
-  { key: 'kb', label: 'KB', titleField: 'kb_nazwa', poziom: 3 },
-  { key: 'silniki', label: 'Silnik', titleField: 'nazwa_silnika', poziom: 4 },
-  { key: 'czujniki', label: 'Czujnik', titleField: 'nazwa_czujnik', poziom: 4 },
+  { key: 'urzadzenia', label: 'Urządzenie', titleField: 'nazwa', poziom: 3 },
+  { key: 'kb', label: 'KB', titleField: 'kb_nazwa', poziom: 4 },
+  { key: 'silniki', label: 'Silnik', titleField: 'nazwa_silnika', poziom: 5 },
+  { key: 'czujniki', label: 'Czujnik', titleField: 'nazwa_czujnik', poziom: 5 },
 ];
 
 const WEZEL_SZEROKOSC = 190;
@@ -73,15 +89,16 @@ export function createGraphView(containerId) {
   }
 
   async function wczytajDane() {
-    const [rozdzielnie, poleRozdzielcze, transformatory, kb, silniki, czujniki] = await Promise.all([
+    const [rozdzielnie, poleRozdzielcze, transformatory, urzadzenia, kb, silniki, czujniki] = await Promise.all([
       nadzorGetAll('rozdzielnie'),
       nadzorGetAll('poleRozdzielcze'),
       nadzorGetAll('transformatory'),
+      nadzorGetAll('urzadzenia'),
       nadzorGetAll('kb'),
       nadzorGetAll('silniki'),
       nadzorGetAll('czujniki'),
     ]);
-    dane = { rozdzielnie, poleRozdzielcze, transformatory, kb, silniki, czujniki };
+    dane = { rozdzielnie, poleRozdzielcze, transformatory, urzadzenia, kb, silniki, czujniki };
   }
 
   // Rodzice DANEGO węzła spośród węzłów już obecnych na płótnie (patrz
@@ -101,11 +118,43 @@ export function createGraphView(containerId) {
         const r = znajdzRekord('poleRozdzielcze', w.id);
         if (r && wskazujeNa(rekord.zasilany_z_pola, r, 'p_nazwa')) rodzice.push(w);
       }
-    } else if (typ === 'kb') {
+    } else if (typ === 'urzadzenia') {
+      // Urządzenie może być zasilane z Transformatora ALBO z innego
+      // Urządzenia (self-referencja, patrz nadzor-entities.js) — dwa
+      // niezależne dopasowania w jednej pętli po węzłach na płótnie.
       for (const w of platno) {
-        if (w.typ !== 'transformatory') continue;
-        const r = znajdzRekord('transformatory', w.id);
-        if (r && wskazujeNa(rekord.zasilany_z_transformatora, r, 't_nr')) rodzice.push(w);
+        if (w.typ === 'transformatory') {
+          const r = znajdzRekord('transformatory', w.id);
+          if (r && wskazujeNa(rekord.zasilane_z_transformatora, r, 't_nr')) rodzice.push(w);
+        } else if (w.typ === 'urzadzenia') {
+          if (w.id === rekord.id) continue; // nie rysuj strzałki węzła do samego siebie
+          const r = znajdzRekord('urzadzenia', w.id);
+          if (r && wskazujeNa(rekord.zasilane_z_urzadzenia, r, 'nazwa')) rodzice.push(w);
+        }
+      }
+    } else if (typ === 'kb') {
+      // KB może być zasilane bezpośrednio z Transformatora ALBO z końca
+      // łańcucha Urządzeń — dwa niezależne dopasowania (01.09.2026).
+      for (const w of platno) {
+        if (w.typ === 'transformatory') {
+          const r = znajdzRekord('transformatory', w.id);
+          if (r && wskazujeNa(rekord.zasilany_z_transformatora, r, 't_nr')) rodzice.push(w);
+        } else if (w.typ === 'urzadzenia') {
+          const r = znajdzRekord('urzadzenia', w.id);
+          if (r && wskazujeNa(rekord.zasilany_z_urzadzenia, r, 'nazwa')) rodzice.push(w);
+        }
+      }
+    } else if (typ === 'rozdzielnie') {
+      // Self-referencja (01.09.2026) — Rozdzielnia ma DWA niezależne pola
+      // zasilania (główne/rezerwowe), oba sprawdzane osobno; może więc mieć
+      // do dwóch rodziców naraz (już wspierane przez architekturę — rodzice
+      // to tablica).
+      for (const w of platno) {
+        if (w.typ !== 'rozdzielnie' || w.id === rekord.id) continue;
+        const r = znajdzRekord('rozdzielnie', w.id);
+        if (!r) continue;
+        if (wskazujeNa(rekord.r_zasilana_z_glowne, r, 'nazwa_r')) rodzice.push(w);
+        if (wskazujeNa(rekord.r_zasilana_z_rezerwowe, r, 'nazwa_r')) rodzice.push(w);
       }
     } else if (typ === 'silniki' || typ === 'czujniki') {
       for (const w of platno) {
@@ -153,6 +202,7 @@ export function createGraphView(containerId) {
     const tytul = rekord[def.titleField] || '(bez nazwy)';
     let detale = '';
     if (typ === 'transformatory') detale = rekord.t_napiecie || '';
+    else if (typ === 'urzadzenia') detale = [rekord.moc ? `${rekord.moc} kW` : '', rekord.nap_zas].filter(Boolean).join(' · ');
     else if (typ === 'kb') detale = rekord.typ_kb || '';
     else if (typ === 'silniki') detale = [rekord.s_moc ? `${rekord.s_moc} kW` : '', rekord.napiecie_zas, rekord.s_rodzaj].filter(Boolean).join(' · ');
     else if (typ === 'czujniki') detale = rekord.opis || '';

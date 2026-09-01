@@ -7,6 +7,13 @@
 // fk-multi, patrz nadzor-entities.js/crud-module.js), nie po dopasowaniu
 // tekstu jak w poprzednim schemacie: Rozdzielnia -> Pole rozdzielcze
 // (miejsce_zabudowy) -> KB (zasilany_z_pola) -> Silniki/Czujniki (fk-multi).
+// 01.09.2026: dołożone Urządzenia (Transformator -> Urządzenie -> ...
+// -> Urządzenie/KB, self-referencja + drugie, opcjonalne pole na KB) — patrz
+// renderUrzadzeniaFor/renderKbFor. Rozdzielnia dostała też self-referencyjne
+// "zasilana z — główne/rezerwowe", ale świadomie TYLKO dla Grafu zasilania
+// i integralności danych — Mapa rejonu nadal traktuje wszystkie Rozdzielnie
+// jako korzenie drzewa (dwa możliwe rodzice nie dają się czysto zagnieździć
+// w drzewie bez duplikowania poddrzewa).
 // Pole rozdzielcze/KB mogą wciąż wskazywać "rodzica" wolnym tekstem (opcja
 // "inny, wpisz ręcznie") — dopasowanie w takim przypadku jest po nazwie,
 // więc rekordy, których nic nie dopasuje, nadal trafiają do sekcji
@@ -60,10 +67,11 @@ function wskazujeNa(wartosc, rekordRodzica, poleWyswietlaneRodzica) {
 export async function renderDashboard(containerId, { onEditRecord } = {}) {
   const container = document.getElementById(containerId);
 
-  const [rozdzielnie, poleRozdzielcze, transformatory, kb, silniki, czujniki] = await Promise.all([
+  const [rozdzielnie, poleRozdzielcze, transformatory, urzadzenia, kb, silniki, czujniki] = await Promise.all([
     nadzorGetAll('rozdzielnie'),
     nadzorGetAll('poleRozdzielcze'),
     nadzorGetAll('transformatory'),
+    nadzorGetAll('urzadzenia'),
     nadzorGetAll('kb'),
     nadzorGetAll('silniki'),
     nadzorGetAll('czujniki'),
@@ -72,7 +80,7 @@ export async function renderDashboard(containerId, { onEditRecord } = {}) {
   const silnikiById = new Map(silniki.map((s) => [s.id, s]));
   const czujnikiById = new Map(czujniki.map((c) => [c.id, c]));
 
-  const usedIds = { poleRozdzielcze: new Set(), transformatory: new Set(), kb: new Set(), silniki: new Set(), czujniki: new Set() };
+  const usedIds = { poleRozdzielcze: new Set(), transformatory: new Set(), urzadzenia: new Set(), kb: new Set(), silniki: new Set(), czujniki: new Set() };
 
   function renderSilnikiCzujnikiFor(kbRecord) {
     const silnikiHtml = (Array.isArray(kbRecord.silniki) ? kbRecord.silniki : [])
@@ -98,15 +106,61 @@ export async function renderDashboard(containerId, { onEditRecord } = {}) {
     return silnikiHtml + czujnikiHtml;
   }
 
-  function renderKbFor(transformatorRecord) {
+  // 01.09.2026: KB może być zasilane bezpośrednio z Transformatora ALBO z
+  // końca łańcucha Urządzeń — stąd parentTyp, żeby wiedzieć którym polem
+  // dopasowywać (zasilany_z_transformatora vs zasilany_z_urzadzenia).
+  function renderKbFor(parentTyp, parentRecord) {
+    const poleWyswietlaneRodzica = parentTyp === 'transformatory' ? 't_nr' : 'nazwa';
+    const poleZasilania = parentTyp === 'transformatory' ? 'zasilany_z_transformatora' : 'zasilany_z_urzadzenia';
     return kb
-      .filter((k) => wskazujeNa(k.zasilany_z_transformatora, transformatorRecord, 't_nr'))
+      .filter((k) => wskazujeNa(k[poleZasilania], parentRecord, poleWyswietlaneRodzica))
       .map((k) => {
         usedIds.kb.add(k.id);
         return node(
           `${k.typ_kb ? k.typ_kb + ' — ' : ''}${k.kb_nazwa}`,
           { expired: hasExpiredZabezpieczenie(k.nastawy_zabezpieczen), entityKey: 'kb', id: k.id },
           renderSilnikiCzujnikiFor(k)
+        );
+      })
+      .join('');
+  }
+
+  // Urządzenie może być zasilane z Transformatora ALBO z innego Urządzenia
+  // (self-referencja w nadzor-entities.js: zasilane_z_urzadzenia) — stąd
+  // parametr parentTyp, żeby wiedzieć którym polem/kluczem dopasowywać.
+  // Rekurencja obsługuje łańcuchy urządzenie -> urządzenie dowolnej długości,
+  // a na końcu każdego urządzenia dorzuca też KB, które mogą być zasilane
+  // właśnie z niego (nie tylko bezpośrednio z transformatora).
+  //
+  // ancestorIds śledzi łańcuch przodków w TEJ gałęzi drzewa — jeśli
+  // urządzenie wskazuje na coś, co już jest jego własnym przodkiem (albo na
+  // samo siebie), to cykl w danych; bez tej ochrony rekurencja poniżej
+  // zawiesiłaby przeglądarkę (crud-module.js NIE blokuje takich pętli przy
+  // wypełnianiu formularza — patrz komentarz w nadzor-entities.js).
+  function renderUrzadzeniaFor(parentTyp, parentRecord, ancestorIds = new Set()) {
+    const poleWyswietlaneRodzica = parentTyp === 'transformatory' ? 't_nr' : 'nazwa';
+    const poleZasilania = parentTyp === 'transformatory' ? 'zasilane_z_transformatora' : 'zasilane_z_urzadzenia';
+    return urzadzenia
+      .filter((u) => wskazujeNa(u[poleZasilania], parentRecord, poleWyswietlaneRodzica))
+      .map((u) => {
+        usedIds.urzadzenia.add(u.id);
+        if (ancestorIds.has(u.id)) {
+          return node(`⚠ ${u.nazwa} — pętla zasilania w danych, popraw ręcznie`, {
+            entityKey: 'urzadzenia',
+            id: u.id,
+          });
+        }
+        const dalejAncestorIds = new Set(ancestorIds);
+        dalejAncestorIds.add(u.id);
+        return node(
+          u.symbol ? `Urządzenie: ${u.nazwa} (${u.symbol})` : `Urządzenie: ${u.nazwa}`,
+          {
+            meta: [u.moc ? `${u.moc} kW` : '', u.nap_zas].filter(Boolean).join(' · '),
+            expired: hasExpiredZabezpieczenie(u.nastawy_zabezpieczen),
+            entityKey: 'urzadzenia',
+            id: u.id,
+          },
+          renderUrzadzeniaFor('urzadzenia', u, dalejAncestorIds) + renderKbFor('urzadzenia', u)
         );
       })
       .join('');
@@ -120,7 +174,7 @@ export async function renderDashboard(containerId, { onEditRecord } = {}) {
         return node(
           `Transformator ${t.t_nr}`,
           { meta: t.t_napiecie || '', entityKey: 'transformatory', id: t.id },
-          renderKbFor(t)
+          renderKbFor('transformatory', t) + renderUrzadzeniaFor('transformatory', t)
         );
       })
       .join('');
@@ -158,6 +212,7 @@ export async function renderDashboard(containerId, { onEditRecord } = {}) {
   const orphanGroups = [
     { label: 'Pola rozdzielcze', entityKey: 'poleRozdzielcze', records: poleRozdzielcze.filter((r) => !usedIds.poleRozdzielcze.has(r.id)), titleField: 'p_nazwa' },
     { label: 'Transformatory', entityKey: 'transformatory', records: transformatory.filter((r) => !usedIds.transformatory.has(r.id)), titleField: 't_nr' },
+    { label: 'Urządzenia', entityKey: 'urzadzenia', records: urzadzenia.filter((r) => !usedIds.urzadzenia.has(r.id)), titleField: 'nazwa' },
     { label: 'KB', entityKey: 'kb', records: kb.filter((r) => !usedIds.kb.has(r.id)), titleField: 'kb_nazwa' },
     { label: 'Silniki (nieprzypisane do żadnego KB)', entityKey: 'silniki', records: silniki.filter((r) => !usedIds.silniki.has(r.id)), titleField: 'nazwa_silnika' },
     { label: 'Czujniki (nieprzypisane do żadnego KB)', entityKey: 'czujniki', records: czujniki.filter((r) => !usedIds.czujniki.has(r.id)), titleField: 'nazwa_czujnik' },

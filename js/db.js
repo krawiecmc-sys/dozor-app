@@ -1,5 +1,5 @@
 const DB_NAME = 'dozor-baza-wiedzy';
-const DB_VERSION = 8;
+const DB_VERSION = 9;
 const STORE = 'wiedza';
 const STORE_META = 'meta';
 const SEED_VERSION_KEY = 'seedVersion';
@@ -9,8 +9,15 @@ const SEED_VERSION_KEY = 'seedVersion';
 // rozdzielnie -> poleRozdzielcze (miejsce_zabudowy, fk-or-free) ->
 // transformatory (zasilany_z_pola, fk-or-free; dodane ponownie 31.08.2026
 // jako osobna tabela, na wyraźną prośbę usera po zobaczeniu Fazy 1-4) ->
-// kb (zasilany_z_transformatora, fk-or-free; silniki[]/czujniki[],
-// fk-multi) -> silniki / czujniki. Magazyn "Przeglądu" (bieżący + OUG/WUG)
+// urzadzenia (01.09.2026: sprzęt kopalniany — wyłączniki, szafy
+// stycznikowe, agregaty, pompy, zespoły transformatorowe, wentylatory,
+// wiertnice; zasilane_z_transformatora ALBO zasilane_z_urzadzenia,
+// oba fk-or-free — drugie to self-referencja, obsługuje łańcuchy
+// urządzenie -> urządzenie dowolnej długości) ->
+// kb (zasilany_z_transformatora ALBO zasilany_z_urzadzenia, oba
+// fk-or-free — KB może więc wisieć bezpośrednio na transformatorze albo
+// na końcu łańcucha urządzeń; silniki[]/czujniki[], fk-multi) ->
+// silniki / czujniki. Magazyn "Przeglądu" (bieżący + OUG/WUG)
 // i magazyn "Diagnostyki" (baza + analiza) bez zmian. Stare magazyny
 // (przodki/kombajny/urzadzeniaRejonowe/zabezpieczeniaKatalog/chodnikiTrasy)
 // świadomie usunięte — patrz plan reorganizacji, sekcja "Co znika". W
@@ -21,6 +28,7 @@ export const NADZOR_STORES = [
   'rozdzielnie',
   'poleRozdzielcze',
   'transformatory',
+  'urzadzenia',
   'kb',
   'czujniki',
   'silniki',
