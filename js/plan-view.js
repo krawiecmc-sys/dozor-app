@@ -87,6 +87,12 @@ export function createPlanView(containerId) {
   let dane = {};
   let geo = new Map(); // chodnik.id -> geometria w metrach
   let widok = { s: 1.6, tx: 40, ty: 60, dopasowany: false }; // px = m * s + t
+  // 03.11.2026: wielkość symboli (Piotr: "nieczytelne, zmniejsz ikony") — domyślnie średnie (0,65 dawnych)
+  const SKALE = { male: 0.5, srednie: 0.65, duze: 0.9 };
+  let wielkosc = 'srednie';
+  try { wielkosc = localStorage.getItem('protektor-plan-symbole') || 'srednie'; } catch {}
+  if (!SKALE[wielkosc]) wielkosc = 'srednie';
+  const sk = () => SKALE[wielkosc];
   let warstwy = { chodniki: true, przenosniki: true, obiekty: true, kable: true, opisyKabli: true, zrodlo: false };
   let stawianie = null; // { store, id } — tryb "kliknij na chodniku"
   let pozycje = {}; // `${store}:${id}` -> { x, y } (px, ekran)
@@ -98,9 +104,18 @@ export function createPlanView(containerId) {
 
   container.innerHTML = `
     <div class="plan-toolbar">
-      <button type="button" class="btn-small" data-akcja="zoom-">−</button>
-      <button type="button" class="btn-small" data-akcja="zoom+">+</button>
+      <button type="button" class="btn-small" data-akcja="zoom-" aria-label="Pomniejsz">−</button>
+      <span class="plan-zoom" id="plan-zoom" title="Przybliżenie względem dopasowania">100%</span>
+      <button type="button" class="btn-small" data-akcja="zoom+" aria-label="Powiększ">+</button>
       <button type="button" class="btn-small" data-akcja="dopasuj">Dopasuj</button>
+      <button type="button" class="btn-small" data-akcja="pelny" id="plan-pelny-btn">⛶ Pełny ekran</button>
+      <label class="plan-wielkosc">Symbole
+        <select data-akcja-wielkosc="1">
+          <option value="male" ${wielkosc === 'male' ? 'selected' : ''}>małe</option>
+          <option value="srednie" ${wielkosc === 'srednie' ? 'selected' : ''}>średnie</option>
+          <option value="duze" ${wielkosc === 'duze' ? 'selected' : ''}>duże</option>
+        </select>
+      </label>
       <button type="button" class="btn-small" data-akcja="drukuj">Drukuj / PDF</button>
       <button type="button" class="btn-small" data-akcja="svg">Zapisz SVG</button>
       <details class="plan-warstwy">
@@ -225,6 +240,7 @@ export function createPlanView(containerId) {
     const sw = Math.max(o.maxX - o.minX, 20);
     const sh = Math.max(o.maxY - o.minY, 20);
     v.s = Math.max(0.05, Math.min((szer - 2 * margines) / sw, (wys - 2 * margines) / sh, 8));
+    if (v === widok) widok.sFit = v.s;
     v.tx = margines - o.minX * v.s + ((szer - 2 * margines) - sw * v.s) / 2;
     v.ty = margines - o.minY * v.s + ((wys - 2 * margines) - sh * v.s) / 2;
     return v;
@@ -315,25 +331,27 @@ export function createPlanView(containerId) {
 
   // ---------- symbole ----------
 
-  function symbol(typ, x, y, obwodka) {
-    const st = `stroke="${obwodka}" stroke-width="3"`;
-    if (typ === 'rozdzielnia') return `<rect x="${x - 24}" y="${y - 17}" width="48" height="34" rx="7" fill="#b3d495" ${st}/>`;
-    if (typ === 'pole') return `<rect x="${x - 6}" y="${y - 6}" width="12" height="12" fill="#ffffff" stroke="${obwodka}" stroke-width="2"/>`;
-    if (typ === 'transformator') return `<circle cx="${x}" cy="${y - 8}" r="11" fill="#ffffff" ${st}/><circle cx="${x}" cy="${y + 8}" r="11" fill="none" ${st}/>`;
-    if (typ === 'naped') return `<rect x="${x - 11}" y="${y - 11}" width="22" height="22" transform="rotate(45 ${x} ${y})" fill="#777777" ${st}/>`;
+  function symbol(typ, x, y, obwodka, k = sk()) {
+    const f = (v) => +(v * k).toFixed(1);
+    const st = `stroke="${obwodka}" stroke-width="${Math.max(1.2, f(3))}"`;
+    if (typ === 'rozdzielnia') return `<rect x="${x - f(24)}" y="${y - f(17)}" width="${f(48)}" height="${f(34)}" rx="${f(7)}" fill="#b3d495" ${st}/>`;
+    if (typ === 'pole') return `<rect x="${x - f(6)}" y="${y - f(6)}" width="${f(12)}" height="${f(12)}" fill="#ffffff" stroke="${obwodka}" stroke-width="${Math.max(1, f(2))}"/>`;
+    if (typ === 'transformator') return `<circle cx="${x}" cy="${y - f(8)}" r="${f(11)}" fill="#ffffff" ${st}/><circle cx="${x}" cy="${y + f(8)}" r="${f(11)}" fill="none" ${st}/>`;
+    if (typ === 'naped') return `<rect x="${x - f(11)}" y="${y - f(11)}" width="${f(22)}" height="${f(22)}" transform="rotate(45 ${x} ${y})" fill="#777777" ${st}/>`;
     if (typ === 'kombajn') {
       const pkt = [];
       for (let i = 0; i < 10; i += 1) {
-        const r = i % 2 === 0 ? 16 : 7;
+        const r = (i % 2 === 0 ? 16 : 7) * k;
         const a = (Math.PI / 5) * i - Math.PI / 2;
         pkt.push(`${(x + r * Math.cos(a)).toFixed(1)},${(y + r * Math.sin(a)).toFixed(1)}`);
       }
       return `<polygon points="${pkt.join(' ')}" fill="#111111" ${st}/>`;
     }
-    return `<rect x="${x - 11}" y="${y - 11}" width="22" height="22" fill="#1fa31f" ${st}/>`;
+    return `<rect x="${x - f(11)}" y="${y - f(11)}" width="${f(22)}" height="${f(22)}" fill="#1fa31f" ${st}/>`;
   }
 
-  const ROZMIAR = { rozdzielnia: [26, 19], transformator: [13, 21], naped: [16, 16], kombajn: [17, 17], pole: [7, 7], urzadzenie: [13, 13] };
+  const ROZMIAR_BAZOWY = { rozdzielnia: [26, 19], transformator: [13, 21], naped: [16, 16], kombajn: [17, 17], pole: [7, 7], urzadzenie: [13, 13] };
+  const rozmiarSymbolu = (typ) => (ROZMIAR_BAZOWY[typ] || [12, 12]).map((v) => v * sk());
 
   // ---------- rysowanie ----------
 
@@ -346,7 +364,7 @@ export function createPlanView(containerId) {
 
     const zajmij = (x1, y1, x2, y2) => zajete.push({ x1, y1, x2, y2 });
     const koliduje = (b) => zajete.some((z) => b.x1 < z.x2 && b.x2 > z.x1 && b.y1 < z.y2 && b.y2 > z.y1);
-    function opis(x, y, tekst, { rx = 13, ry = 13, rozmiar = 12, kolor = KOLOR.tekst, grupa = 'opisy', wazny = false } = {}) {
+    function opis(x, y, tekst, { rx = 13, ry = 13, rozmiar = Math.round(9 + 3 * sk()), kolor = KOLOR.tekst, grupa = 'opisy', wazny = false } = {}) {
       if (!tekst) return;
       const w = tekst.length * rozmiar * 0.56;
       const h = rozmiar + 2;
@@ -368,15 +386,16 @@ export function createPlanView(containerId) {
       czesci[grupa].push(`<text x="${wybrany.x.toFixed(1)}" y="${wybrany.y.toFixed(1)}" text-anchor="${wybrany.a}" font-size="${rozmiar}" font-family="Arial, sans-serif" fill="${kolor}"${wazny ? ' font-weight="bold"' : ''} paint-order="stroke" stroke="#ffffff" stroke-width="3" stroke-linejoin="round">${esc(tekst)}</text>`);
     }
 
+    const pasChodnika = Math.max(6, Math.round(13 * sk()));
     // chodniki
     for (const [id, g] of geo) {
       const a = naEkran({ x: g.x0, y: g.y0 }, v);
       const b = naEkran({ x: g.x0 + g.dx * g.len, y: g.y0 + g.dy * g.len }, v);
-      czesci.chodniki.push(`<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${KOLOR.chodnikBrzeg}" stroke-width="16" stroke-linecap="round"/><line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${KOLOR.chodnik}" stroke-width="13" stroke-linecap="round" data-chodnik="${id}"/>`);
+      czesci.chodniki.push(`<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${KOLOR.chodnikBrzeg}" stroke-width="${pasChodnika + 3}" stroke-linecap="round"/><line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${KOLOR.chodnik}" stroke-width="${pasChodnika}" stroke-linecap="round" data-chodnik="${id}"/>`);
       if (g.rec.ch_w_drazeniu === 'tak') {
-        const k = 26;
+        const k = 26 * sk();
         const c = { x: b.x + g.dx * 6, y: b.y + g.dy * 6 };
-        czesci.chodniki.push(`<line x1="${c.x - g.dx * k}" y1="${c.y - g.dy * k}" x2="${c.x + g.dx * 14}" y2="${c.y + g.dy * 14}" stroke="${KOLOR.linia}" stroke-width="3" marker-end="url(#plan-strzalka)"/>`);
+        czesci.chodniki.push(`<line x1="${c.x - g.dx * k}" y1="${c.y - g.dy * k}" x2="${c.x + g.dx * 14 * sk()}" y2="${c.y + g.dy * 14 * sk()}" stroke="${KOLOR.linia}" stroke-width="${Math.max(1.5, 3 * sk())}" marker-end="url(#plan-strzalka)"/>`);
       }
     }
 
@@ -395,10 +414,10 @@ export function createPlanView(containerId) {
         let x;
         let y;
         if (znak === 0) {
-          x = p.x + g.dx * 30 * k;
-          y = p.y + g.dy * 30 * k;
+          x = p.x + g.dx * 30 * sk() * k;
+          y = p.y + g.dy * 30 * sk() * k;
         } else {
-          const odl = 46 + 32 * k;
+          const odl = pasChodnika / 2 + 30 * sk() + 6 + 32 * sk() * k;
           x = p.x + znak * g.nx * odl;
           y = p.y + znak * g.ny * odl;
         }
@@ -415,7 +434,7 @@ export function createPlanView(containerId) {
       if (!pr) continue;
       const i = polaRozdz[r.id] || 0;
       polaRozdz[r.id] = i + 1;
-      poz[`poleRozdzielcze:${pole.id}`] = { x: pr.x - 18 + i * 16, y: pr.y + 28, lok: pr.lok, rec: pole, def: { store: 'poleRozdzielcze', symbol: 'pole', label: 'Pole rozdzielcze', title: 'p_nazwa' } };
+      poz[`poleRozdzielcze:${pole.id}`] = { x: pr.x - 18 * sk() + i * 16 * sk(), y: pr.y + 28 * sk(), lok: pr.lok, rec: pole, def: { store: 'poleRozdzielcze', symbol: 'pole', label: 'Pole rozdzielcze', title: 'p_nazwa' } };
     }
     // napędy przenośników
     for (const pr of dane.przenosniki || []) {
@@ -427,7 +446,7 @@ export function createPlanView(containerId) {
 
     // zarezerwuj miejsca symboli, zanim rozmieścimy opisy
     for (const p of Object.values(poz)) {
-      const [rx, ry] = ROZMIAR[p.def.symbol] || [12, 12];
+      const [rx, ry] = rozmiarSymbolu(p.def.symbol);
       zajmij(p.x - rx, p.y - ry, p.x + rx, p.y + ry);
     }
 
@@ -438,7 +457,7 @@ export function createPlanView(containerId) {
       const g = geo.get(ch.id);
       const a = naEkran(punktM(ch.id, num(pr.pr_od_m) ?? 0), v);
       const b = naEkran(punktM(ch.id, num(pr.pr_do_m) ?? g.len), v);
-      czesci.przenosniki.push(`<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${KOLOR.linia}" stroke-width="3.5"/>`);
+      czesci.przenosniki.push(`<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${KOLOR.linia}" stroke-width="${(1.5 + 2.5 * sk()).toFixed(1)}"/>`);
     }
 
     // kable
@@ -454,7 +473,7 @@ export function createPlanView(containerId) {
         continue;
       }
       const kolor = napiecieKabla(p) >= 3 ? KOLOR.kabelSN : KOLOR.kabelNN;
-      const odsun = -(12 + 4.5 * (pas % 7));
+      const odsun = -(pasChodnika / 2 + 3 + 3.5 * (pas % 7));
       pas += 1;
       let punkty = [{ x: a.x, y: a.y }];
       const t = a.lok && b.lok ? trasa(a.lok, b.lok) : null;
@@ -468,7 +487,7 @@ export function createPlanView(containerId) {
       punkty.push({ x: b.x, y: b.y });
       punkty = punkty.filter((q, i) => i === 0 || Math.hypot(q.x - punkty[i - 1].x, q.y - punkty[i - 1].y) > 0.5);
       const idKabla = `${p.cel.store}:${p.cel.rec.id}:${p.prefiks}`;
-      czesci.kable.push(`<polyline points="${punkty.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(' ')}" fill="none" stroke="${kolor}" stroke-width="2.2" stroke-dasharray="8 4" stroke-linejoin="round"/><polyline points="${punkty.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(' ')}" fill="none" stroke="transparent" stroke-width="12" data-kabel="${esc(idKabla)}" class="plan-klik"/>`);
+      czesci.kable.push(`<polyline points="${punkty.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(' ')}" fill="none" stroke="${kolor}" stroke-width="${(1.2 + 1 * sk()).toFixed(1)}" stroke-dasharray="7 3" stroke-linejoin="round"/><polyline points="${punkty.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(' ')}" fill="none" stroke="transparent" stroke-width="12" data-kabel="${esc(idKabla)}" class="plan-klik"/>`);
       if (warstwy.opisyKabli) {
         let naj = 0;
         let s = [punkty[0], punkty[1] || punkty[0]];
@@ -477,7 +496,7 @@ export function createPlanView(containerId) {
           if (d > naj) { naj = d; s = [punkty[i - 1], punkty[i]]; }
         }
         const tekst = maOpisKabla(p.cel.rec, p.prefiks) ? opisKabla(p.cel.rec, p.prefiks) : '? kabel';
-        opisyKabli.push([(s[0].x + s[1].x) / 2, (s[0].y + s[1].y) / 2, tekst, { rx: 2, ry: 4, rozmiar: 10, kolor, grupa: 'kable' }]);
+        opisyKabli.push([(s[0].x + s[1].x) / 2, (s[0].y + s[1].y) / 2, tekst, { rx: 2, ry: 4, rozmiar: Math.round(8 + 2 * sk()), kolor, grupa: 'kable' }]);
       }
       kable.push({ ...p, narysowany: true, id: idKabla });
     }
@@ -491,7 +510,7 @@ export function createPlanView(containerId) {
       const obw = warstwy.zrodlo ? KOLOR.zrodlo[rec.zrodlo_danych || ''] || KOLOR.zrodlo[''] : KOLOR.linia;
       czesci.obiekty.push(`<g data-obiekt="${esc(klucz)}" class="plan-klik">${symbol(def.symbol, p.x, p.y, obw)}</g>`);
       if (def.store === 'poleRozdzielcze') continue;
-      const [rx, ry] = ROZMIAR[def.symbol] || [12, 12];
+      const [rx, ry] = rozmiarSymbolu(def.symbol);
       const tytul = def.store === 'przenosniki' ? [rec.pr_typ, rec.pr_nr].filter(Boolean).join(' ') : rec[def.title];
       opis(p.x, p.y, tytul || '(bez nazwy)', { rx, ry, wazny: def.store === 'rozdzielnie' || def.store === 'kb' });
     }
@@ -502,7 +521,7 @@ export function createPlanView(containerId) {
     if (warstwy.chodniki) {
       for (const g of geo.values()) {
         const srodek = naEkran({ x: g.x0 + (g.dx * g.len) / 2, y: g.y0 + (g.dy * g.len) / 2 }, v);
-        opis(srodek.x, srodek.y, g.rec.ch_nazwa + (g.brakDanych ? ' ⚠' : ''), { rx: 10, ry: 12, rozmiar: 11, kolor: '#5b6874' });
+        opis(srodek.x, srodek.y, g.rec.ch_nazwa + (g.brakDanych ? ' ⚠' : ''), { rx: 10 * sk(), ry: 12 * sk(), rozmiar: Math.round(8.5 + 2.5 * sk()), kolor: '#5b6874' });
       }
     }
 
@@ -537,13 +556,17 @@ export function createPlanView(containerId) {
     }
     wrapEl.classList.remove('hidden');
     const szer = wrapEl.clientWidth || 800;
-    const maksWys = Math.max(360, Math.round(window.innerHeight * 0.72));
+    const pelny = container.classList.contains('plan-pelny');
+    const maksWys = pelny
+      ? Math.max(300, Math.round(window.innerHeight - wrapEl.getBoundingClientRect().top - 6))
+      : Math.max(360, Math.round(window.innerHeight * 0.72));
+    if (pelny) widok.wys = maksWys;
     if (!widok.dopasowany) {
       // wysokość dobrana do kształtu rejonu (wąski telefon + "płaski" rejon = niski plan, bez pustego pasa)
       dopasuj(szer, maksWys);
       const o = obszarSwiata();
       const potrzebna = (o.maxY - o.minY) * widok.s + 2 * Math.max(36, Math.min(110, szer * 0.12));
-      widok.wys = Math.round(Math.min(maksWys, Math.max(360, potrzebna)));
+      widok.wys = pelny ? maksWys : Math.round(Math.min(maksWys, Math.max(360, potrzebna)));
       dopasuj(szer, widok.wys);
       widok.dopasowany = true;
     }
@@ -554,6 +577,8 @@ export function createPlanView(containerId) {
     svgEl.setAttribute('height', wys);
     svgEl.setAttribute('viewBox', `0 0 ${szer} ${wys}`);
     svgEl.innerHTML = w.svg;
+    const zoomEl = container.querySelector('#plan-zoom');
+    if (zoomEl && widok.sFit) zoomEl.textContent = `${Math.round((widok.s / widok.sFit) * 100)}%`;
     renderBaner();
     renderLegenda();
     renderBraki(w);
@@ -568,7 +593,7 @@ export function createPlanView(containerId) {
   }
 
   function renderLegenda() {
-    const pozycja = (typ, tekst) => `<span class="plan-leg"><svg width="34" height="34" viewBox="0 0 34 34">${symbol(typ, 17, 17, KOLOR.linia)}</svg>${tekst}</span>`;
+    const pozycja = (typ, tekst) => `<span class="plan-leg"><svg width="24" height="24" viewBox="0 0 34 34">${symbol(typ, 17, 17, KOLOR.linia, 0.8)}</svg>${tekst}</span>`;
     legendaEl.innerHTML = `
       ${pozycja('rozdzielnia', 'Rozdzielnia')}
       ${pozycja('pole', 'Pole rozdzielcze')}
@@ -816,6 +841,33 @@ export function createPlanView(containerId) {
 
   // ---------- zdarzenia ----------
 
+  function ustawPelny(wlacz) {
+    container.classList.toggle('plan-pelny', wlacz);
+    document.body.classList.toggle('plan-pelny-body', wlacz);
+    const btn = container.querySelector('#plan-pelny-btn');
+    if (btn) btn.textContent = wlacz ? '✕ Zamknij pełny ekran' : '⛶ Pełny ekran';
+    widok.dopasowany = false;
+    recznie = false;
+    render();
+  }
+
+  async function przelaczPelny() {
+    const wlacz = !container.classList.contains('plan-pelny');
+    if (wlacz) {
+      ustawPelny(true);
+      try { if (container.requestFullscreen && !document.fullscreenElement) await container.requestFullscreen(); } catch {}
+    } else {
+      try { if (document.fullscreenElement) await document.exitFullscreen(); } catch {}
+      ustawPelny(false);
+    }
+  }
+
+  document.addEventListener('fullscreenchange', () => {
+    // wyjście klawiszem Esc / gestem systemu — zsynchronizuj widok
+    if (!document.fullscreenElement && container.classList.contains('plan-pelny')) ustawPelny(false);
+    else if (document.fullscreenElement === container) { widok.dopasowany = false; render(); }
+  });
+
   function zoom(mnoznik, ox, oy) {
     recznie = true;
     const sx = ox ?? (wrapEl.clientWidth || 800) / 2;
@@ -834,6 +886,7 @@ export function createPlanView(containerId) {
     const akcja = t.dataset.akcja;
     if (akcja === 'zoom+') zoom(1.3);
     else if (akcja === 'zoom-') zoom(1 / 1.3);
+    else if (akcja === 'pelny') przelaczPelny();
     else if (akcja === 'dopasuj') { widok.dopasowany = false; recznie = false; render(); }
     else if (akcja === 'drukuj') drukuj();
     else if (akcja === 'svg') zapiszSvg();
@@ -868,6 +921,13 @@ export function createPlanView(containerId) {
         render();
       }
     }
+  });
+
+  container.querySelector('[data-akcja-wielkosc]').addEventListener('change', (e) => {
+    wielkosc = e.target.value;
+    try { localStorage.setItem('protektor-plan-symbole', wielkosc); } catch {}
+    if (!recznie) widok.dopasowany = false;
+    render();
   });
 
   container.querySelectorAll('[data-warstwa]').forEach((cb) => {

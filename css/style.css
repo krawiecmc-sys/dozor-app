@@ -914,3 +914,21 @@ body {
 .xls-podglad { border-collapse: collapse; font-size: 0.8rem; min-width: 100%; }
 .xls-podglad th, .xls-podglad td { border: 1px solid #c9d1d8; padding: 0.2rem 0.4rem; text-align: left; white-space: nowrap; }
 .xls-podglad th { background: var(--grey); }
+
+.plan-wielkosc { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.85rem; }
+.plan-wielkosc select { padding: 0.25rem 0.4rem; border-radius: 6px; border: 1px solid #c9d1d8; font-size: 0.85rem; }
+
+/* Plan rejonu — pełny ekran i wskaźnik przybliżenia (03.11.2026) */
+.plan-zoom { display: inline-flex; align-items: center; min-width: 3.2rem; justify-content: center; font-size: 0.85rem; color: var(--grey-dark); }
+#plan-content.plan-pelny {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--grey);
+  overflow: auto;
+  padding-bottom: 0;
+}
+#plan-content.plan-pelny .plan-wrap { margin: 0 0.4rem; }
+#plan-content.plan-pelny .plan-toolbar { padding: 0.4rem; position: sticky; top: 0; background: var(--grey); z-index: 6; }
+#plan-content.plan-pelny .plan-baner { display: none; }
+body.plan-pelny-body { overflow: hidden; }
