@@ -17,6 +17,10 @@
 // więc nic więcej nie było potrzebne.
 
 import { nadzorGetAll } from './db.js';
+import { KOLOR, kolorNapiecia, symbolSvg, napiecieRekordu } from './symbole.js';
+
+// 03.11.2026: węzeł ma symbol wg PN-EN 60617 i pasek w kolorze napięcia, strzałka — kolor napięcia zasilania (jak Plan rejonu).
+const SYMBOL_TYPU = { rozdzielnie: 'rozdzielnia', poleRozdzielcze: 'pole', transformatory: 'transformator', urzadzenia: 'urzadzenie', kb: 'kombajn', silniki: 'naped', czujniki: 'czujnik' };
 
 // 01.09.2026: dołożone Urządzenia (poziom 3) między Transformator i KB —
 // KB dostało drugie, opcjonalne pole zasilania (zasilany_z_urzadzenia), więc
@@ -224,10 +228,13 @@ export function createGraphView(containerId) {
         const def = TYPY.find((t) => t.key === w.typ);
         const { tytul, detale } = etykietaWezla(w.typ, rekord);
         const pos = pozycje[`${w.typ}:${w.id}`];
+        const nap = napiecieRekordu(w.typ, rekord, dane.rozdzielnie || []);
+        const kolor = w.typ === 'transformatory' ? kolorNapiecia(nap[0]) : kolorNapiecia(nap[1]);
+        const ikona = `<svg class="graph-node-ikona" width="30" height="24" viewBox="-3 -1 40 34" aria-hidden="true">${symbolSvg(SYMBOL_TYPU[w.typ], 17, 16, KOLOR.obrys, 0.68, nap)}</svg>`;
         return `
-          <div class="graph-node" data-typ="${w.typ}" data-id="${w.id}" style="left:${pos.x}px; top:${pos.y}px; width:${WEZEL_SZEROKOSC}px;">
+          <div class="graph-node" data-typ="${w.typ}" data-id="${w.id}" style="left:${pos.x}px; top:${pos.y}px; width:${WEZEL_SZEROKOSC}px; border-left-color:${kolor};">
             <div class="graph-node-head">
-              <span class="graph-node-typ">${escapeHtml(def.label)}</span>
+              <span class="graph-node-typ">${ikona}${escapeHtml(def.label)}</span>
               <button type="button" class="graph-node-remove" data-typ="${w.typ}" data-id="${w.id}" aria-label="Usuń z widoku">×</button>
             </div>
             <div class="graph-node-title">${escapeHtml(tytul)}</div>
@@ -256,9 +263,7 @@ export function createGraphView(containerId) {
     svgEl.setAttribute('height', wysokosc);
     svgEl.innerHTML = `
       <defs>
-        <marker id="graph-arrowhead" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-          <path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"></path>
-        </marker>
+        ${[KOLOR.sn, KOLOR.nn1, KOLOR.nn05, KOLOR.obrys].map((c, i) => `<marker id="graph-arrowhead-${i}" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="${c}"></path></marker>`).join('')}
       </defs>
       ${krawedzie
         .map((k) => {
@@ -270,7 +275,11 @@ export function createGraphView(containerId) {
           const x2 = do_.x + WEZEL_SZEROKOSC / 2;
           const y2 = do_.y;
           const midY = (y1 + y2) / 2;
-          return `<path d="M${x1},${y1} C${x1},${midY} ${x2},${midY} ${x2},${y2}" stroke="var(--accent)" stroke-width="2" fill="none" marker-end="url(#graph-arrowhead)"></path>`;
+          const rOd = znajdzRekord(k.od.typ, k.od.id);
+          const napOd = napiecieRekordu(k.od.typ, rOd, dane.rozdzielnie || [])[1];
+          const kolor = kolorNapiecia(napOd);
+          const nr = [KOLOR.sn, KOLOR.nn1, KOLOR.nn05, KOLOR.obrys].indexOf(kolor);
+          return `<path d="M${x1},${y1} C${x1},${midY} ${x2},${midY} ${x2},${y2}" stroke="${kolor}" stroke-width="${napOd >= 3 ? 2.6 : 2}" fill="none" marker-end="url(#graph-arrowhead-${nr < 0 ? 3 : nr})"></path>`;
         })
         .join('')}
     `;

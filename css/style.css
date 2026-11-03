@@ -940,3 +940,7 @@ body.plan-pelny-body { overflow: hidden; }
 .oug-label { padding: 0.12rem 0.25rem; font-size: 0.88rem; line-height: 1.25; }
 .oug-node-row .btn-small { padding: 0.12rem 0.45rem; font-size: 0.75rem; line-height: 1.2; min-height: 0; }
 .oug-check { width: 1rem; height: 1rem; }
+
+/* Graf zasilania — symbol typu w nagłówku węzła, pasek w kolorze napięcia (03.11.2026) */
+.graph-node-typ { display: inline-flex; align-items: center; gap: 0.3rem; }
+.graph-node-ikona { flex-shrink: 0; }
