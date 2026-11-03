@@ -45,15 +45,24 @@ const ZASILANIE = {
   przenosniki: [['zasilany_z_urzadzenia', 'urzadzenia', 'nazwa', 'kabel']],
 };
 
+// Kolory jak na schematach elektroenergetycznych (03.11.2026): kolor = poziom napięcia,
+// obrys aparatów ciemnografitowy, symbole wg PN-EN 60617 (M = silnik, dwa koła = transformator,
+// × = wyłącznik, szyna zbiorcza w rozdzielni).
 const KOLOR = {
-  linia: '#1a7f1a',
-  chodnik: '#d5dbe0',
-  chodnikBrzeg: '#b8c1c9',
-  kabelSN: '#c0392b',
-  kabelNN: '#d68910',
+  obrys: '#263238',
+  aparat: '#eceff1',
+  sn: '#c62828', // SN (3–30 kV, w rejonie zwykle 6 kV)
+  nn1: '#1565c0', // nn 1 kV (1000 V)
+  nn05: '#00838f', // nn do 0,69 kV (500 V, 400 V)
+  przenosnik: '#455a64',
+  drazenie: '#e65100',
+  chodnik: '#e3e7ea',
+  chodnikBrzeg: '#9aa7b1',
   tekst: '#1b1b1b',
-  zrodlo: { Excel: '#1f6fb5', 'ręcznie': '#d68910', pomiar: '#1a7f1a', '': '#9aa5ae' },
+  tekstChodnika: '#546e7a',
+  zrodlo: { Excel: '#1565c0', 'ręcznie': '#ef6c00', pomiar: '#2e7d32', '': '#90a4ae' },
 };
+const kolorNapiecia = (kV) => (kV === null || kV === undefined ? KOLOR.obrys : kV >= 3 ? KOLOR.sn : kV >= 0.9 ? KOLOR.nn1 : KOLOR.nn05);
 
 const MARKER_PRZYKLADU = 'plan-rejonu';
 
@@ -75,10 +84,14 @@ function rozwiaz(wartosc, rekordy, pole) {
   return rekordy.find((r) => String(r[pole] || '').trim().toLowerCase() === w) || null;
 }
 
+// Napięcie w kV z opisu: "6 kV" -> 6, "1 kV" -> 1, "1000 V" -> 1, "500 V" -> 0,5.
+// Do 03.11.2026 "1000 V" dawało 1000 i kabel nn rysował się jak SN.
 function kv(tekst) {
-  if (!tekst) return null;
+  if (tekst === null || tekst === undefined || tekst === '') return null;
   const m = String(tekst).replace(',', '.').match(/[\d.]+/);
-  return m ? Number(m[0]) : null;
+  if (!m) return null;
+  const v = Number(m[0]);
+  return v >= 100 ? v / 1000 : v;
 }
 
 export function createPlanView(containerId) {
@@ -331,26 +344,67 @@ export function createPlanView(containerId) {
 
   // ---------- symbole ----------
 
-  function symbol(typ, x, y, obwodka, k = sk()) {
-    const f = (v) => +(v * k).toFixed(1);
-    const st = `stroke="${obwodka}" stroke-width="${Math.max(1.2, f(3))}"`;
-    if (typ === 'rozdzielnia') return `<rect x="${x - f(24)}" y="${y - f(17)}" width="${f(48)}" height="${f(34)}" rx="${f(7)}" fill="#b3d495" ${st}/>`;
-    if (typ === 'pole') return `<rect x="${x - f(6)}" y="${y - f(6)}" width="${f(12)}" height="${f(12)}" fill="#ffffff" stroke="${obwodka}" stroke-width="${Math.max(1, f(2))}"/>`;
-    if (typ === 'transformator') return `<circle cx="${x}" cy="${y - f(8)}" r="${f(11)}" fill="#ffffff" ${st}/><circle cx="${x}" cy="${y + f(8)}" r="${f(11)}" fill="none" ${st}/>`;
-    if (typ === 'naped') return `<rect x="${x - f(11)}" y="${y - f(11)}" width="${f(22)}" height="${f(22)}" transform="rotate(45 ${x} ${y})" fill="#777777" ${st}/>`;
-    if (typ === 'kombajn') {
-      const pkt = [];
-      for (let i = 0; i < 10; i += 1) {
-        const r = (i % 2 === 0 ? 16 : 7) * k;
-        const a = (Math.PI / 5) * i - Math.PI / 2;
-        pkt.push(`${(x + r * Math.cos(a)).toFixed(1)},${(y + r * Math.sin(a)).toFixed(1)}`);
-      }
-      return `<polygon points="${pkt.join(' ')}" fill="#111111" ${st}/>`;
+  // Napięcie obiektu [strona górna, strona dolna] w kV (do koloru symbolu).
+  function napiecieObiektu(store, rec) {
+    if (!rec) return [null, null];
+    if (store === 'rozdzielnie') { const v = kv(rec.r_napiecie) ?? 6; return [v, v]; }
+    if (store === 'poleRozdzielcze') { const r = rozwiaz(rec.miejsce_zabudowy, dane.rozdzielnie, 'nazwa_r'); const v = kv(r?.r_napiecie) ?? 6; return [v, v]; }
+    if (store === 'transformatory') {
+      const cz = String(rec.t_napiecie || '').split('/').map((x) => kv(x)).filter((x) => x !== null);
+      return [cz[0] ?? 6, cz.length > 1 ? Math.max(...cz.slice(1)) : 1];
     }
-    return `<rect x="${x - f(11)}" y="${y - f(11)}" width="${f(22)}" height="${f(22)}" fill="#1fa31f" ${st}/>`;
+    if (store === 'przenosniki') return [null, null];
+    const v = kv(rec.nap_zas);
+    return [v ?? 1, v ?? 1];
   }
 
-  const ROZMIAR_BAZOWY = { rozdzielnia: [26, 19], transformator: [13, 21], naped: [16, 16], kombajn: [17, 17], pole: [7, 7], urzadzenie: [13, 13] };
+  // Symbole wg PN-EN 60617, uproszczone do planu rejonu. obwodka = obrys (albo kolor źródła danych),
+  // nap = [kV górne, kV dolne] — kolor szyny/uzwojeń/zacisków.
+  function symbol(typ, x, y, obwodka, k = sk(), nap = [null, null]) {
+    const f = (v) => +(v * k).toFixed(1);
+    const sw = Math.max(1.1, f(1.8));
+    const st = `stroke="${obwodka}" stroke-width="${sw}"`;
+    const [gora, dol] = nap.map(kolorNapiecia);
+    if (typ === 'rozdzielnia') {
+      // obudowa + szyna zbiorcza w kolorze napięcia + trzy odpływy
+      const w = f(46), h = f(28), x0 = x - w / 2, y0 = y - h / 2, ys = y0 + f(8);
+      const odp = [-1, 0, 1].map((i) => `<line x1="${x + i * f(13)}" y1="${ys}" x2="${x + i * f(13)}" y2="${y0 + h - f(4)}" stroke="${gora}" stroke-width="${sw}"/><rect x="${x + i * f(13) - f(3)}" y="${ys + f(6)}" width="${f(6)}" height="${f(6)}" fill="#ffffff" stroke="${gora}" stroke-width="${Math.max(0.8, f(1.2))}"/>`).join('');
+      return `<rect x="${x0}" y="${y0}" width="${w}" height="${h}" rx="${f(2)}" fill="#ffffff" ${st}/><line x1="${x0 + f(5)}" y1="${ys}" x2="${x0 + w - f(5)}" y2="${ys}" stroke="${gora}" stroke-width="${Math.max(2, f(3.2))}" stroke-linecap="round"/>${odp}`;
+    }
+    if (typ === 'pole') {
+      // pole z wyłącznikiem: kwadrat z „×”
+      const a = f(6);
+      return `<rect x="${x - a}" y="${y - a}" width="${2 * a}" height="${2 * a}" fill="#ffffff" stroke="${gora}" stroke-width="${Math.max(1, f(1.6))}"/><path d="M${x - a * 0.55},${y - a * 0.55} L${x + a * 0.55},${y + a * 0.55} M${x + a * 0.55},${y - a * 0.55} L${x - a * 0.55},${y + a * 0.55}" stroke="${obwodka}" stroke-width="${Math.max(1, f(1.4))}"/>`;
+    }
+    if (typ === 'transformator') {
+      // dwa zachodzące koła: górne = strona SN, dolne = strona nn
+      const r = f(10), d = f(6.5), w = Math.max(1.4, f(2.2));
+      return `<circle cx="${x}" cy="${y + d}" r="${r}" fill="#ffffff" stroke="${dol}" stroke-width="${w}"/><circle cx="${x}" cy="${y - d}" r="${r}" fill="none" stroke="${gora}" stroke-width="${w}"/>`
+        + (obwodka !== KOLOR.obrys ? `<circle cx="${x}" cy="${y}" r="${f(18)}" fill="none" stroke="${obwodka}" stroke-width="${Math.max(1, f(1.4))}" stroke-dasharray="3 2"/>` : '');
+    }
+    if (typ === 'naped') {
+      // silnik napędu przenośnika: koło z „M”
+      const r = f(10);
+      return `<circle cx="${x}" cy="${y}" r="${r}" fill="#ffffff" ${st}/><text x="${x}" y="${y + f(4.3)}" text-anchor="middle" font-size="${f(12.5)}" font-weight="bold" font-family="Arial, sans-serif" fill="${obwodka}">M</text>`;
+    }
+    if (typ === 'kombajn') {
+      // kombajn chodnikowy: korpus + organ urabiający
+      const w = f(26), h = f(14);
+      const zeby = Array.from({ length: 8 }, (_, i) => {
+        const a = (Math.PI / 4) * i;
+        return `${(x + w / 2 + f(3) + f(9.5) * Math.cos(a)).toFixed(1)},${(y + f(9.5) * Math.sin(a)).toFixed(1)}`;
+      });
+      return `<rect x="${x - w / 2 - f(4)}" y="${y - h / 2}" width="${w}" height="${h}" rx="${f(2)}" fill="#37474f" ${st}/>`
+        + `<polygon points="${zeby.join(' ')}" fill="#ffb300" ${st}/><circle cx="${x + w / 2 + f(3)}" cy="${y}" r="${f(3)}" fill="#37474f"/>`;
+    }
+    // urządzenie (aparat: wyłącznik, stycznik, zespół): prostokąt z łącznikiem
+    const w = f(24), h = f(16), c = dol;
+    return `<rect x="${x - w / 2}" y="${y - h / 2}" width="${w}" height="${h}" rx="${f(1.5)}" fill="${KOLOR.aparat}" ${st}/>`
+      + `<circle cx="${x - f(6)}" cy="${y + f(3)}" r="${f(1.6)}" fill="${c}"/><circle cx="${x + f(6)}" cy="${y + f(3)}" r="${f(1.6)}" fill="${c}"/>`
+      + `<line x1="${x - f(6)}" y1="${y + f(3)}" x2="${x + f(5)}" y2="${y - f(4)}" stroke="${c}" stroke-width="${Math.max(1, f(1.6))}" stroke-linecap="round"/>`;
+  }
+
+  const ROZMIAR_BAZOWY = { rozdzielnia: [24, 15], transformator: [11, 17], naped: [11, 11], kombajn: [20, 10], pole: [7, 7], urzadzenie: [13, 9] };
   const rozmiarSymbolu = (typ) => (ROZMIAR_BAZOWY[typ] || [12, 12]).map((v) => v * sk());
 
   // ---------- rysowanie ----------
@@ -395,7 +449,7 @@ export function createPlanView(containerId) {
       if (g.rec.ch_w_drazeniu === 'tak') {
         const k = 26 * sk();
         const c = { x: b.x + g.dx * 6, y: b.y + g.dy * 6 };
-        czesci.chodniki.push(`<line x1="${c.x - g.dx * k}" y1="${c.y - g.dy * k}" x2="${c.x + g.dx * 14 * sk()}" y2="${c.y + g.dy * 14 * sk()}" stroke="${KOLOR.linia}" stroke-width="${Math.max(1.5, 3 * sk())}" marker-end="url(#plan-strzalka)"/>`);
+        czesci.chodniki.push(`<line x1="${c.x - g.dx * k}" y1="${c.y - g.dy * k}" x2="${c.x + g.dx * 14 * sk()}" y2="${c.y + g.dy * 14 * sk()}" stroke="${KOLOR.drazenie}" stroke-width="${Math.max(1.5, 3 * sk())}" marker-end="url(#plan-strzalka)"/>`);
       }
     }
 
@@ -457,7 +511,8 @@ export function createPlanView(containerId) {
       const g = geo.get(ch.id);
       const a = naEkran(punktM(ch.id, num(pr.pr_od_m) ?? 0), v);
       const b = naEkran(punktM(ch.id, num(pr.pr_do_m) ?? g.len), v);
-      czesci.przenosniki.push(`<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${KOLOR.linia}" stroke-width="${(1.5 + 2.5 * sk()).toFixed(1)}"/>`);
+      const grub = 2 + 3 * sk();
+      czesci.przenosniki.push(`<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${KOLOR.przenosnik}" stroke-width="${grub.toFixed(1)}" stroke-linecap="butt"/><line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="#ffffff" stroke-width="${(grub * 0.45).toFixed(1)}" stroke-dasharray="1.5 ${(7 * sk() + 4).toFixed(1)}"/>`);
     }
 
     // kable
@@ -472,7 +527,10 @@ export function createPlanView(containerId) {
         kable.push({ ...p, narysowany: false });
         continue;
       }
-      const kolor = napiecieKabla(p) >= 3 ? KOLOR.kabelSN : KOLOR.kabelNN;
+      const napKabla = napiecieKabla(p);
+      const kolor = kolorNapiecia(napKabla);
+      const grubKabla = (napKabla >= 3 ? 1.6 : 1.1) + 1 * sk();
+      const kreski = p.prefiks === 'kabel_rez' ? ' stroke-dasharray="7 4"' : '';
       const odsun = -(pasChodnika / 2 + 3 + 3.5 * (pas % 7));
       pas += 1;
       let punkty = [{ x: a.x, y: a.y }];
@@ -487,7 +545,7 @@ export function createPlanView(containerId) {
       punkty.push({ x: b.x, y: b.y });
       punkty = punkty.filter((q, i) => i === 0 || Math.hypot(q.x - punkty[i - 1].x, q.y - punkty[i - 1].y) > 0.5);
       const idKabla = `${p.cel.store}:${p.cel.rec.id}:${p.prefiks}`;
-      czesci.kable.push(`<polyline points="${punkty.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(' ')}" fill="none" stroke="${kolor}" stroke-width="${(1.2 + 1 * sk()).toFixed(1)}" stroke-dasharray="7 3" stroke-linejoin="round"/><polyline points="${punkty.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(' ')}" fill="none" stroke="transparent" stroke-width="12" data-kabel="${esc(idKabla)}" class="plan-klik"/>`);
+      czesci.kable.push(`<polyline points="${punkty.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(' ')}" fill="none" stroke="${kolor}" stroke-width="${grubKabla.toFixed(1)}"${kreski} stroke-linejoin="round"/><polyline points="${punkty.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(' ')}" fill="none" stroke="transparent" stroke-width="12" data-kabel="${esc(idKabla)}" class="plan-klik"/>`);
       if (warstwy.opisyKabli) {
         let naj = 0;
         let s = [punkty[0], punkty[1] || punkty[0]];
@@ -507,8 +565,8 @@ export function createPlanView(containerId) {
       const { rec, def } = p;
       if (def.store === 'przenosniki' && !warstwy.przenosniki) continue;
       if (def.store !== 'przenosniki' && !warstwy.obiekty) continue;
-      const obw = warstwy.zrodlo ? KOLOR.zrodlo[rec.zrodlo_danych || ''] || KOLOR.zrodlo[''] : KOLOR.linia;
-      czesci.obiekty.push(`<g data-obiekt="${esc(klucz)}" class="plan-klik">${symbol(def.symbol, p.x, p.y, obw)}</g>`);
+      const obw = warstwy.zrodlo ? KOLOR.zrodlo[rec.zrodlo_danych || ''] || KOLOR.zrodlo[''] : KOLOR.obrys;
+      czesci.obiekty.push(`<g data-obiekt="${esc(klucz)}" class="plan-klik">${symbol(def.symbol, p.x, p.y, obw, sk(), napiecieObiektu(def.store, rec))}</g>`);
       if (def.store === 'poleRozdzielcze') continue;
       const [rx, ry] = rozmiarSymbolu(def.symbol);
       const tytul = def.store === 'przenosniki' ? [rec.pr_typ, rec.pr_nr].filter(Boolean).join(' ') : rec[def.title];
@@ -521,13 +579,13 @@ export function createPlanView(containerId) {
     if (warstwy.chodniki) {
       for (const g of geo.values()) {
         const srodek = naEkran({ x: g.x0 + (g.dx * g.len) / 2, y: g.y0 + (g.dy * g.len) / 2 }, v);
-        opis(srodek.x, srodek.y, g.rec.ch_nazwa + (g.brakDanych ? ' ⚠' : ''), { rx: 10 * sk(), ry: 12 * sk(), rozmiar: Math.round(8.5 + 2.5 * sk()), kolor: '#5b6874' });
+        opis(srodek.x, srodek.y, g.rec.ch_nazwa + (g.brakDanych ? ' ⚠' : ''), { rx: 10 * sk(), ry: 12 * sk(), rozmiar: Math.round(8.5 + 2.5 * sk()), kolor: KOLOR.tekstChodnika });
       }
     }
 
     const svg = `
       <defs>
-        <marker id="plan-strzalka" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="${KOLOR.linia}"/></marker>
+        <marker id="plan-strzalka" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="${KOLOR.drazenie}"/></marker>
       </defs>
       <rect x="0" y="0" width="${szer}" height="${wys}" fill="#ffffff" data-tlo="1"/>
       ${czesci.chodniki.join('')}
@@ -593,18 +651,22 @@ export function createPlanView(containerId) {
   }
 
   function renderLegenda() {
-    const pozycja = (typ, tekst) => `<span class="plan-leg"><svg width="24" height="24" viewBox="0 0 34 34">${symbol(typ, 17, 17, KOLOR.linia, 0.8)}</svg>${tekst}</span>`;
+    const pozycja = (typ, tekst, nap = [6, 1]) => `<span class="plan-leg"><svg width="30" height="26" viewBox="-2 0 38 34">${symbol(typ, 17, 17, KOLOR.obrys, 0.62, nap)}</svg>${tekst}</span>`;
+    const kabel = (kolor, tekst, kreski = '') => `<span class="plan-leg"><svg width="34" height="10"><line x1="0" y1="5" x2="34" y2="5" stroke="${kolor}" stroke-width="2.4"${kreski}/></svg>${tekst}</span>`;
     legendaEl.innerHTML = `
-      ${pozycja('rozdzielnia', 'Rozdzielnia')}
-      ${pozycja('pole', 'Pole rozdzielcze')}
-      ${pozycja('transformator', 'Transformator')}
-      ${pozycja('urzadzenie', 'Urządzenie')}
-      ${pozycja('naped', 'Napęd nr')}
+      ${pozycja('rozdzielnia', 'Rozdzielnia (szyna zbiorcza)', [6, 6])}
+      ${pozycja('pole', 'Pole z wyłącznikiem', [6, 6])}
+      ${pozycja('transformator', 'Transformator SN/nn')}
+      ${pozycja('urzadzenie', 'Aparat / urządzenie', [1, 1])}
+      ${pozycja('naped', 'Napęd (silnik M)')}
       ${pozycja('kombajn', 'Kombajn / KB')}
-      <span class="plan-leg"><svg width="34" height="10"><line x1="0" y1="5" x2="34" y2="5" stroke="${KOLOR.kabelSN}" stroke-width="2.2" stroke-dasharray="8 4"/></svg>Kabel SN (6 kV)</span>
-      <span class="plan-leg"><svg width="34" height="10"><line x1="0" y1="5" x2="34" y2="5" stroke="${KOLOR.kabelNN}" stroke-width="2.2" stroke-dasharray="8 4"/></svg>Kabel nn (1 / 0,5 kV)</span>
-      <span class="plan-leg"><svg width="34" height="10"><line x1="0" y1="5" x2="34" y2="5" stroke="${KOLOR.linia}" stroke-width="3.5"/></svg>Przenośnik</span>
-      ${warstwy.zrodlo ? `<span class="plan-leg">Obwódka: <b style="color:${KOLOR.zrodlo.Excel}">Excel</b> · <b style="color:${KOLOR.zrodlo['ręcznie']}">ręcznie</b> · <b style="color:${KOLOR.zrodlo.pomiar}">pomiar</b> · <b style="color:${KOLOR.zrodlo['']}">nie podano</b></span>` : ''}
+      ${kabel(KOLOR.sn, 'Kabel SN (6 kV)')}
+      ${kabel(KOLOR.nn1, 'Kabel nn 1 kV')}
+      ${kabel(KOLOR.nn05, 'Kabel nn ≤ 0,69 kV')}
+      ${kabel(KOLOR.obrys, 'Kabel rezerwowy', ' stroke-dasharray="7 4"')}
+      <span class="plan-leg"><svg width="34" height="10"><line x1="0" y1="5" x2="34" y2="5" stroke="${KOLOR.przenosnik}" stroke-width="4"/><line x1="0" y1="5" x2="34" y2="5" stroke="#fff" stroke-width="1.8" stroke-dasharray="1.5 6"/></svg>Przenośnik</span>
+      <span class="plan-leg"><svg width="34" height="10"><line x1="0" y1="5" x2="26" y2="5" stroke="${KOLOR.drazenie}" stroke-width="2.5"/><path d="M24,1 L33,5 L24,9 z" fill="${KOLOR.drazenie}"/></svg>Kierunek drążenia</span>
+      ${warstwy.zrodlo ? `<span class="plan-leg">Obrys: <b style="color:${KOLOR.zrodlo.Excel}">Excel</b> · <b style="color:${KOLOR.zrodlo['ręcznie']}">ręcznie</b> · <b style="color:${KOLOR.zrodlo.pomiar}">pomiar</b> · <b style="color:${KOLOR.zrodlo['']}">nie podano</b></span>` : ''}
     `;
   }
 
