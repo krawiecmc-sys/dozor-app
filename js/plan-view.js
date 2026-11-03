@@ -46,6 +46,18 @@ const ZASILANIE = {
   przenosniki: [['zasilany_z_urzadzenia', 'urzadzenia', 'nazwa', 'kabel']],
 };
 
+// Rodzaje elementow do dodania z planu (03.11.2026): pole nazwy i pole napiecia (te same co w formularzach).
+const RODZAJE = [
+  { store: 'rozdzielnie', label: 'Rozdzielnia', nazwa: 'nazwa_r', nap: { key: 'r_napiecie', opcje: ['6 kV', '1 kV', '0,5 kV'] } },
+  { store: 'poleRozdzielcze', label: 'Pole rozdzielcze', nazwa: 'p_nazwa' },
+  { store: 'transformatory', label: 'Transformator', nazwa: 't_nr', nap: { key: 't_napiecie', opcje: ['6/1 kV', '6/0,5 kV', '6/0,5/1 kV'] } },
+  { store: 'urzadzenia', label: 'Urządzenie / aparat', nazwa: 'nazwa', nap: { key: 'nap_zas', opcje: ['1 kV', '0,5 kV', '6 kV'] } },
+  { store: 'kb', label: 'Kombajn / KB', nazwa: 'kb_nazwa' },
+  { store: 'przenosniki', label: 'Przenośnik / napęd', nazwa: 'pr_nr' },
+];
+// Znacznik napiecia przy kablu: 6 kV / 1 kV / 0,5 kV
+const znacznikNapiecia = (kV) => (kV === null || kV === undefined ? '' : `${String(+Number(kV).toFixed(2)).replace('.', ',')} kV`);
+
 const MARKER_PRZYKLADU = 'plan-rejonu';
 
 function esc(str) {
@@ -78,7 +90,10 @@ export function createPlanView(containerId) {
   try { wielkosc = localStorage.getItem('protektor-plan-symbole') || 'srednie'; } catch {}
   if (!SKALE[wielkosc]) wielkosc = 'srednie';
   const sk = () => SKALE[wielkosc];
-  let warstwy = { chodniki: true, przenosniki: true, obiekty: true, kable: true, opisyKabli: true, zrodlo: false };
+  const WARSTWY_DOMYSLNE = { chodniki: true, przenosniki: true, obiekty: true, daneObiektow: true, kable: true, napiecieKabli: true, opisyKabli: true, zrodlo: false };
+  let warstwy = { ...WARSTWY_DOMYSLNE };
+  try { Object.assign(warstwy, JSON.parse(localStorage.getItem('protektor-plan-warstwy') || '{}')); } catch {}
+  const zaznacz = (k) => (warstwy[k] ? 'checked' : '');
   let stawianie = null; // { store, id } — tryb "kliknij na chodniku"
   let pozycje = {}; // `${store}:${id}` -> { x, y } (px, ekran)
   let ostatnieKable = [];
@@ -89,6 +104,7 @@ export function createPlanView(containerId) {
 
   container.innerHTML = `
     <div class="plan-toolbar">
+      <button type="button" class="btn-small btn-primary" data-akcja="dodaj-element">+ Dodaj element</button>
       <button type="button" class="btn-small" data-akcja="zoom-" aria-label="Pomniejsz">−</button>
       <span class="plan-zoom" id="plan-zoom" title="Przybliżenie względem dopasowania">100%</span>
       <button type="button" class="btn-small" data-akcja="zoom+" aria-label="Powiększ">+</button>
@@ -104,17 +120,20 @@ export function createPlanView(containerId) {
       <button type="button" class="btn-small" data-akcja="drukuj">Drukuj / PDF</button>
       <button type="button" class="btn-small" data-akcja="svg">Zapisz SVG</button>
       <details class="plan-warstwy">
-        <summary class="btn-small">Warstwy</summary>
-        <label><input type="checkbox" data-warstwa="chodniki" checked> Chodniki i opisy</label>
-        <label><input type="checkbox" data-warstwa="przenosniki" checked> Przenośniki i napędy</label>
-        <label><input type="checkbox" data-warstwa="obiekty" checked> Urządzenia</label>
-        <label><input type="checkbox" data-warstwa="kable" checked> Kable</label>
-        <label><input type="checkbox" data-warstwa="opisyKabli" checked> Opisy kabli</label>
-        <label><input type="checkbox" data-warstwa="zrodlo"> Źródło danych (kolor obwódki)</label>
+        <summary class="btn-small">☰ Warstwy — co pokazać</summary>
+        <label><input type="checkbox" data-warstwa="chodniki" ${zaznacz('chodniki')}> Chodniki i ich nazwy</label>
+        <label><input type="checkbox" data-warstwa="przenosniki" ${zaznacz('przenosniki')}> Przenośniki i napędy</label>
+        <label><input type="checkbox" data-warstwa="obiekty" ${zaznacz('obiekty')}> Urządzenia (symbole i nazwy)</label>
+        <label><input type="checkbox" data-warstwa="daneObiektow" ${zaznacz('daneObiektow')}> Dane urządzeń (napięcie, moc, typ)</label>
+        <label><input type="checkbox" data-warstwa="kable" ${zaznacz('kable')}> Kable (linie)</label>
+        <label><input type="checkbox" data-warstwa="napiecieKabli" ${zaznacz('napiecieKabli')}> Znaczniki napięcia kabli (6 kV / 1 kV / 0,5 kV)</label>
+        <label><input type="checkbox" data-warstwa="opisyKabli" ${zaznacz('opisyKabli')}> Opisy kabli (nr, typ, przekrój, długość)</label>
+        <label><input type="checkbox" data-warstwa="zrodlo" ${zaznacz('zrodlo')}> Źródło danych (kolor obrysu)</label>
       </details>
     </div>
     <div id="plan-baner" class="plan-baner hidden"></div>
     <div id="plan-stawianie" class="plan-stawianie hidden"></div>
+    <form id="plan-dodaj" class="plan-dodaj hidden" autocomplete="off"></form>
     <div id="plan-wrap" class="plan-wrap">
       <svg id="plan-svg" xmlns="http://www.w3.org/2000/svg"></svg>
       <div id="plan-karta" class="plan-karta hidden"></div>
@@ -127,6 +146,7 @@ export function createPlanView(containerId) {
   const kartaEl = container.querySelector('#plan-karta');
   const banerEl = container.querySelector('#plan-baner');
   const stawianieEl = container.querySelector('#plan-stawianie');
+  const dodajEl = container.querySelector('#plan-dodaj');
   const legendaEl = container.querySelector('#plan-legenda');
   const brakiEl = container.querySelector('#plan-braki');
 
@@ -319,6 +339,17 @@ export function createPlanView(containerId) {
   const napiecieObiektu = (store, rec) => napiecieRekordu(store, rec, dane.rozdzielnie || []);
   const symbol = (typ, x, y, obwodka, k = sk(), nap = [null, null]) => symbolSvg(typ, x, y, obwodka, k, nap);
 
+  // Krótkie dane pod nazwą obiektu (warstwa "Dane urządzeń")
+  function daneObiektu(store, rec) {
+    const kw = (v, j) => (num(v) ? `${num(v)} ${j}` : '');
+    if (store === 'rozdzielnie') return [rec.r_napiecie, rec.r_typ].filter(Boolean).join(' · ');
+    if (store === 'transformatory') return [rec.t_typ, rec.t_napiecie, kw(rec.t_moc, 'kVA')].filter(Boolean).join(' · ');
+    if (store === 'urzadzenia') return [rec.nap_zas, kw(rec.moc, 'kW')].filter(Boolean).join(' · ');
+    if (store === 'kb') return [rec.typ_kb, rec.nap_zas].filter(Boolean).join(' · ');
+    if (store === 'przenosniki') return kw(rec.pr_moc, 'kW');
+    return '';
+  }
+
   const ROZMIAR_BAZOWY = { rozdzielnia: [24, 15], transformator: [11, 17], naped: [11, 11], kombajn: [20, 10], pole: [7, 7], urzadzenie: [13, 9] };
   const rozmiarSymbolu = (typ) => (ROZMIAR_BAZOWY[typ] || [12, 12]).map((v) => v * sk());
 
@@ -353,6 +384,17 @@ export function createPlanView(containerId) {
       const b = pudlo(wybrany);
       zajmij(b.x1, b.y1, b.x2, b.y2);
       czesci[grupa].push(`<text x="${wybrany.x.toFixed(1)}" y="${wybrany.y.toFixed(1)}" text-anchor="${wybrany.a}" font-size="${rozmiar}" font-family="Arial, sans-serif" fill="${kolor}"${wazny ? ' font-weight="bold"' : ''} paint-order="stroke" stroke="#ffffff" stroke-width="3" stroke-linejoin="round">${esc(tekst)}</text>`);
+      return { ...wybrany, rozmiar };
+    }
+    // druga linia pod opisem (dane urządzenia) — mniejsza, szara
+    function podpis(pol, tekst) {
+      if (!pol || !tekst) return;
+      const r = Math.max(7, Math.round(pol.rozmiar * 0.82));
+      const y = pol.y + r + 1;
+      const w = tekst.length * r * 0.56;
+      const x1 = pol.a === 'start' ? pol.x : pol.a === 'end' ? pol.x - w : pol.x - w / 2;
+      zajmij(x1, y - r, x1 + w, y + 2);
+      czesci.opisy.push(`<text x="${pol.x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${pol.a}" font-size="${r}" font-family="Arial, sans-serif" fill="#546e7a" paint-order="stroke" stroke="#ffffff" stroke-width="3" stroke-linejoin="round">${esc(tekst)}</text>`);
     }
 
     const pasChodnika = Math.max(6, Math.round(13 * sk()));
@@ -461,15 +503,17 @@ export function createPlanView(containerId) {
       punkty = punkty.filter((q, i) => i === 0 || Math.hypot(q.x - punkty[i - 1].x, q.y - punkty[i - 1].y) > 0.5);
       const idKabla = `${p.cel.store}:${p.cel.rec.id}:${p.prefiks}`;
       czesci.kable.push(`<polyline points="${punkty.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(' ')}" fill="none" stroke="${kolor}" stroke-width="${grubKabla.toFixed(1)}"${kreski} stroke-linejoin="round"/><polyline points="${punkty.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(' ')}" fill="none" stroke="transparent" stroke-width="12" data-kabel="${esc(idKabla)}" class="plan-klik"/>`);
-      if (warstwy.opisyKabli) {
+      if (warstwy.napiecieKabli || warstwy.opisyKabli) {
         let naj = 0;
         let s = [punkty[0], punkty[1] || punkty[0]];
         for (let i = 1; i < punkty.length; i += 1) {
           const d = Math.hypot(punkty[i].x - punkty[i - 1].x, punkty[i].y - punkty[i - 1].y);
           if (d > naj) { naj = d; s = [punkty[i - 1], punkty[i]]; }
         }
-        const tekst = maOpisKabla(p.cel.rec, p.prefiks) ? opisKabla(p.cel.rec, p.prefiks) : '? kabel';
-        opisyKabli.push([(s[0].x + s[1].x) / 2, (s[0].y + s[1].y) / 2, tekst, { rx: 2, ry: 4, rozmiar: Math.round(8 + 2 * sk()), kolor, grupa: 'kable' }]);
+        // 03.11.2026: dwie warstwy — znacznik napięcia i opis kabla (nr, typ, przekrój, długość), każdą można wyłączyć
+        const tekst = [warstwy.napiecieKabli ? znacznikNapiecia(napKabla) : '', warstwy.opisyKabli && maOpisKabla(p.cel.rec, p.prefiks) ? opisKabla(p.cel.rec, p.prefiks) : '']
+          .filter(Boolean).join(' · ');
+        if (tekst) opisyKabli.push([(s[0].x + s[1].x) / 2, (s[0].y + s[1].y) / 2, tekst, { rx: 2, ry: 4, rozmiar: Math.round(8 + 2 * sk()), kolor, grupa: 'kable' }]);
       }
       kable.push({ ...p, narysowany: true, id: idKabla });
     }
@@ -485,7 +529,8 @@ export function createPlanView(containerId) {
       if (def.store === 'poleRozdzielcze') continue;
       const [rx, ry] = rozmiarSymbolu(def.symbol);
       const tytul = def.store === 'przenosniki' ? [rec.pr_typ, rec.pr_nr].filter(Boolean).join(' ') : rec[def.title];
-      opis(p.x, p.y, tytul || '(bez nazwy)', { rx, ry, wazny: def.store === 'rozdzielnie' || def.store === 'kb' });
+      const pol = opis(p.x, p.y, tytul || '(bez nazwy)', { rx, ry, wazny: def.store === 'rozdzielnie' || def.store === 'kb' });
+      if (warstwy.daneObiektow) podpis(pol, daneObiektu(def.store, rec));
     }
 
     for (const args of opisyKabli) opis(...args);
@@ -730,10 +775,128 @@ export function createPlanView(containerId) {
     const n = najblizszyChodnik(zEkranu({ x: ekranX, y: ekranY }));
     zakonczStawianie();
     if (!rec || !n) return;
-    await nadzorUpdate(store, { ...rec, lok_chodnik: n.id, lok_metraz: n.m, lok_strona: n.strona, plan_dx: 0, plan_dy: 0 });
+    if (store === 'przenosniki') {
+      const len = Math.round(geo.get(n.id)?.len ?? n.m);
+      const nowy = rec.pr_chodnik === undefined || rec.pr_chodnik === '';
+      await nadzorUpdate(store, { ...rec, pr_chodnik: n.id, pr_naped_m: n.m, ...(nowy ? { pr_od_m: n.m, pr_do_m: len } : {}), plan_dx: 0, plan_dy: 0 });
+    } else {
+      await nadzorUpdate(store, { ...rec, lok_chodnik: n.id, lok_metraz: n.m, lok_strona: n.strona, plan_dx: 0, plan_dy: 0 });
+    }
     await wczytajDane();
     render();
   }
+
+  // ---------- dodawanie elementu: zasilony z / odpływ do ----------
+  // Wpisuje te same pola "zasilany z" co formularze — połączenie widać od razu na planie, w grafie i w układzie zasilania.
+
+  const nazwaRek = (store, rec) => rec[NADZOR_ENTITIES[store]?.titleField] || `#${rec.id}`;
+  const etykietaRodzaju = (store) => (RODZAJE.find((r) => r.store === store) || {}).label || store;
+
+  function zrodlaDla(store) {
+    // [{ wartosc, opis }] — kto może zasilać nowy element
+    if (store === 'poleRozdzielcze') {
+      return (dane.rozdzielnie || []).map((r) => ({ wartosc: `miejsce_zabudowy|rozdzielnie|${r.id}`, opis: `Rozdzielnia ${nazwaRek('rozdzielnie', r)} (pole w tej rozdzielni)` }));
+    }
+    const widziane = new Set();
+    const wynik = [];
+    for (const [pole, zStore] of ZASILANIE[store] || []) {
+      if (widziane.has(zStore)) continue; // rozdzielnia: "zasilony z" = zasilanie główne
+      widziane.add(zStore);
+      for (const r of dane[zStore] || []) wynik.push({ wartosc: `${pole}|${zStore}|${r.id}`, opis: `${etykietaRodzaju(zStore)} ${nazwaRek(zStore, r)}` });
+    }
+    return wynik;
+  }
+
+  function odplywyDla(store) {
+    // [{ wartosc, opis }] — kogo nowy element może zasilać
+    const wynik = [];
+    for (const [cel, reguly] of Object.entries(ZASILANIE)) {
+      const pasujace = reguly.filter(([, zStore]) => zStore === store);
+      if (!pasujace.length) continue;
+      for (const r of dane[cel] || []) {
+        const obecne = pasujace.map(([pole, zStore, zPole]) => rozwiaz(r[pole], dane[zStore] || [], zPole)).find(Boolean);
+        wynik.push({ wartosc: `${cel}|${r.id}`, opis: `${etykietaRodzaju(cel)} ${nazwaRek(cel, r)}${obecne ? ` (teraz z: ${nazwaRek(store, obecne)})` : ''}` });
+      }
+    }
+    return wynik;
+  }
+
+  function pokazDodawanie(store = 'urzadzenia') {
+    zamknijKarte();
+    const rodzaj = RODZAJE.find((r) => r.store === store) || RODZAJE[3];
+    const opcje = (lista, pusta) => `<option value="">${pusta}</option>` + lista.map((o) => `<option value="${esc(o.wartosc)}">${esc(o.opis)}</option>`).join('');
+    const zrodla = zrodlaDla(rodzaj.store);
+    const odplywy = odplywyDla(rodzaj.store);
+    dodajEl.innerHTML = `
+      <h4>Dodaj element do planu</h4>
+      <div class="plan-dodaj-pola">
+        <label>Rodzaj
+          <select name="rodzaj">${RODZAJE.map((r) => `<option value="${r.store}" ${r.store === rodzaj.store ? 'selected' : ''}>${r.label}</option>`).join('')}</select>
+        </label>
+        <label>Nazwa / numer
+          <input name="nazwa" required placeholder="${rodzaj.store === 'przenosniki' ? 'np. 1.6' : 'np. ZT-150'}">
+        </label>
+        ${rodzaj.nap ? `<label>Napięcie
+          <select name="napiecie">${rodzaj.nap.opcje.map((o) => `<option>${o}</option>`).join('')}</select>
+        </label>` : ''}
+        <label>${rodzaj.store === 'poleRozdzielcze' ? 'W rozdzielni' : 'Zasilony z'}
+          <select name="zrodlo" ${rodzaj.store === 'poleRozdzielcze' ? 'required' : ''}>${opcje(zrodla, zrodla.length ? '— nie podaję —' : '— brak źródeł tego rodzaju —')}</select>
+        </label>
+        ${odplywy.length ? `<label>Odpływ do
+          <select name="odplyw">${opcje(odplywy, '— nie podaję —')}</select>
+        </label>` : ''}
+      </div>
+      <p class="plan-dodaj-uwaga">${rodzaj.store === 'poleRozdzielcze' ? 'Pole stanie przy swojej rozdzielni.' : 'Po zapisie kliknij na planie przy chodniku, gdzie stoi element — metraż i strona wpiszą się same.'} Kabel (typ, przekrój, długość) uzupełnisz później w formularzu.</p>
+      <div class="form-actions">
+        <button type="submit" class="btn-small btn-primary">Zapisz${rodzaj.store === 'poleRozdzielcze' ? '' : ' i postaw na planie'}</button>
+        <button type="button" class="btn-small" data-akcja="anuluj-dodawanie">Anuluj</button>
+      </div>`;
+    dodajEl.classList.remove('hidden');
+    dodajEl.querySelector('[name="nazwa"]').focus();
+    dodajEl.scrollIntoView({ block: 'nearest' });
+  }
+
+  const zamknijDodawanie = () => { dodajEl.classList.add('hidden'); dodajEl.innerHTML = ''; };
+
+  async function zapiszDodawanie() {
+    const f = new FormData(dodajEl);
+    const store = f.get('rodzaj');
+    const rodzaj = RODZAJE.find((r) => r.store === store);
+    const nazwa = String(f.get('nazwa') || '').trim();
+    if (!rodzaj || !nazwa) return;
+    const rec = { [rodzaj.nazwa]: nazwa, zrodlo_danych: 'ręcznie' };
+    if (rodzaj.nap && f.get('napiecie')) rec[rodzaj.nap.key] = f.get('napiecie');
+    const zr = String(f.get('zrodlo') || '');
+    if (zr) {
+      const [pole, , id] = zr.split('|');
+      rec[pole] = Number(id);
+    }
+    const noweId = await nadzorAdd(store, rec);
+    const od = String(f.get('odplyw') || '');
+    if (od) {
+      const [cel, idCelu] = od.split('|');
+      const celRec = (dane[cel] || []).find((r) => r.id === Number(idCelu));
+      const reguly = (ZASILANIE[cel] || []).filter(([, zStore]) => zStore === store);
+      if (celRec && reguly.length) {
+        // rozdzielnia z zajętym zasilaniem głównym dostaje nowy element jako rezerwowe
+        const wolna = reguly.find(([pole]) => celRec[pole] === undefined || celRec[pole] === null || celRec[pole] === '') || reguly[0];
+        await nadzorUpdate(cel, { ...celRec, [wolna[0]]: noweId });
+      }
+    }
+    zamknijDodawanie();
+    await wczytajDane();
+    render();
+    if (store !== 'poleRozdzielcze') zacznijStawianie(store, noweId);
+  }
+
+  dodajEl.addEventListener('change', (e) => {
+    if (e.target.name === 'rodzaj') {
+      const nazwa = dodajEl.querySelector('[name="nazwa"]').value;
+      pokazDodawanie(e.target.value);
+      dodajEl.querySelector('[name="nazwa"]').value = nazwa;
+    }
+  });
+  dodajEl.addEventListener('submit', (e) => { e.preventDefault(); zapiszDodawanie(); });
 
   // ---------- przykładowy rejon (wzór AM-1) ----------
 
@@ -869,6 +1032,8 @@ export function createPlanView(containerId) {
     else if (akcja === 'svg') zapiszSvg();
     else if (akcja === 'zamknij-karte') zamknijKarte();
     else if (akcja === 'anuluj-stawianie') zakonczStawianie();
+    else if (akcja === 'dodaj-element') pokazDodawanie();
+    else if (akcja === 'anuluj-dodawanie') zamknijDodawanie();
     else if (akcja === 'przyklad') {
       t.disabled = true;
       await wczytajPrzyklad();
@@ -910,6 +1075,7 @@ export function createPlanView(containerId) {
   container.querySelectorAll('[data-warstwa]').forEach((cb) => {
     cb.addEventListener('change', () => {
       warstwy[cb.dataset.warstwa] = cb.checked;
+      try { localStorage.setItem('protektor-plan-warstwy', JSON.stringify(warstwy)); } catch {}
       render();
     });
   });

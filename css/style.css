@@ -944,3 +944,14 @@ body.plan-pelny-body { overflow: hidden; }
 /* Graf zasilania — symbol typu w nagłówku węzła, pasek w kolorze napięcia (03.11.2026) */
 .graph-node-typ { display: inline-flex; align-items: center; gap: 0.3rem; }
 .graph-node-ikona { flex-shrink: 0; }
+
+/* Plan rejonu — dodawanie elementu (zasilony z / odpływ do), 03.11.2026 */
+.plan-dodaj { background: var(--white); border: 1px solid var(--grey); border-left: 4px solid var(--accent); border-radius: 8px; padding: 0.6rem 0.8rem; margin: 0 0 0.6rem; }
+.plan-dodaj h4 { margin: 0 0 0.4rem; font-size: 0.95rem; }
+.plan-dodaj-pola { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0.4rem 0.7rem; }
+.plan-dodaj-pola label { display: flex; flex-direction: column; gap: 0.15rem; font-size: 0.8rem; color: var(--grey-dark); min-width: 0; }
+.plan-dodaj-pola select, .plan-dodaj-pola input { font-size: 0.9rem; padding: 0.3rem; min-width: 0; max-width: 100%; }
+.plan-dodaj-uwaga { font-size: 0.78rem; color: var(--grey-dark); margin: 0.4rem 0; }
+
+/* Plan rejonu — przycisk warstw wyraźniej (03.11.2026: Piotr go nie zauważył) */
+.plan-warstwy > summary { font-weight: 600; border: 1px solid var(--accent); }
