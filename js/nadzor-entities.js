@@ -72,6 +72,9 @@ function poleKabla(prefix = 'kabel', naglowek = 'Kabel zasilający (od źródła
   ];
 }
 
+// Rodzaj urządzenia (03.11.2026, Piotr): transformator zasila wyłączniki/aparaty, nie bezpośrednio silniki.
+export const U_RODZAJE = ['wyłącznik / aparat', 'odbiornik (silnik, pompa, wentylator…)'];
+
 export const NADZOR_ENTITIES = {
   rozdzielnie: {
     label: 'Rozdzielnie',
@@ -127,6 +130,16 @@ export const NADZOR_ENTITIES = {
         refField: 'nazwa_r',
         hint: 'Wybierz z listy istniejących rozdzielni albo wpisz nazwę ręcznie, jeśli jeszcze jej nie ma w bazie.',
       },
+      {
+        // 03.11.2026 (Piotr): pole zasila transformator albo inne pole — przelot 6 kV do kolejnej rozdzielni
+        key: 'zasilane_z_pola',
+        label: 'Zasilane z pola (przelot 6 kV)',
+        type: 'fk-or-free',
+        refStore: 'poleRozdzielcze',
+        refField: 'p_nazwa',
+        hint: 'Dla pola zasilającego rozdzielnicy: pole innej rozdzielni, z którego przychodzi kabel (przelot). Pola odpływowe zostaw puste.',
+      },
+      ...poleKabla('kabel', 'Kabel przelotowy (od pola źródłowego)'),
     ],
   },
   // Dodane ponownie 31.08.2026 jako osobna tabela, na wyraźną prośbę usera
@@ -186,6 +199,7 @@ export const NADZOR_ENTITIES = {
     fields: [
       { key: 'nazwa', label: 'Nazwa / oznaczenie urządzenia', type: 'text', required: true },
       { key: 'symbol', label: 'Symbol', type: 'text' },
+      { key: 'u_rodzaj', label: 'Rodzaj', type: 'select', options: U_RODZAJE, hint: 'Transformator zasila wyłączniki / aparaty. Odbiornik (silnik, pompa, wentylator) zasilany jest z wyłącznika.' },
       { key: 'moc', label: 'Moc (kW)', type: 'number' },
       { key: 'nap_zas', label: 'Napięcie zasilania', type: 'select', options: ['0,5 kV', '1 kV', '6 kV'] },
       {

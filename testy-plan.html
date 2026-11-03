@@ -55,10 +55,23 @@ try {
   ok(kable === 16, `16 kabli (2 SN + 14 nn) narysowanych (jest ${kable})`);
   const teksty = [...svg.querySelectorAll('text')].map((t) => t.textContent);
   ok(teksty.includes('Mifama1100 1.5') && teksty.includes('R-650') && teksty.includes('AM-1'), 'opisy: Mifama1100 1.5, R-650, AM-1');
-  ok(teksty.some((t) => t.startsWith('K2 3x50 690 m')), 'opis kabla K2 3x50 690 m');
-  ok(teksty.filter((t) => t === '? kabel').length === 3, `3 połączenia bez opisu kabla oznaczone "? kabel" (jest ${teksty.filter((t) => t === '? kabel').length})`);
+  ok(teksty.some((t) => t === '6 kV · K2 3x50 690 m'), 'opis kabla: znacznik napięcia + K2 3x50 690 m');
+  const zOpisem = teksty.filter((t) => / kV · K\d+ /.test(t)).length;
+  ok(zOpisem === 13, `13 kabli ze znacznikiem napięcia i opisem, 3 bez opisu (jest ${zOpisem})`);
   const braki = document.getElementById('plan-braki').textContent;
   ok(braki.includes('Bez położenia na planie (1)') && braki.includes('Połączenia bez opisu kabla (3)'), 'lista braków: 1 bez położenia (STARY-T9), 3 bez kabla');
+  // 2b) Układ zasilania (03.11.2026): pole -> trafo / pole, trafo -> wyłącznik, wyłącznik -> odbiorniki
+  const T = plan._test;
+  const zr = (r) => T.zrodlaDla(r).map((o) => o.wartosc.split('|')[1]);
+  ok(zr('odbiornik').length > 0 && zr('odbiornik').every((x) => x === 'urzadzenia'), 'odbiornik: źródła tylko wyłączniki, bez transformatorów');
+  ok(zr('kb').length === 7 && zr('kb').every((x) => x === 'urzadzenia'), `kombajn: 7 wyłączników jako źródło, bez transformatora i odbiornika HMC (jest ${zr('kb').length})`);
+  ok(zr('przenosniki').every((x) => x === 'urzadzenia'), 'napęd przenośnika: tylko z wyłącznika');
+  ok(zr('transformatory').length === 2 && zr('poleRozdzielcze').length === 2 && zr('rozdzielnie').length === 2, 'transformator, pole (przelot) i rozdzielnia: źródłem pola');
+  ok(T.odplywyDla('transformatory').length === 7 && T.odplywyDla('transformatory').every((o) => o.wartosc.startsWith('urzadzenia|')), 'transformator: odpływ tylko do wyłączników (7)');
+  const odpPola = T.odplywyDla('poleRozdzielcze').map((o) => o.wartosc.split('|')[0]);
+  ok(odpPola.includes('transformatory') && odpPola.includes('poleRozdzielcze') && !odpPola.includes('urzadzenia'), 'pole: odpływ do transformatora albo pola (przelot), nie do urządzeń');
+  ok(T.odplywyDla('odbiornik').length === 0, 'odbiornik nie zasila niczego');
+  ok(!document.getElementById('plan-braki').textContent.includes('niezgodne'), 'przykład bez połączeń niezgodnych z układem');
   // NaN w geometrii?
   ok(!svg.innerHTML.includes('NaN'), 'brak NaN w rysunku');
 

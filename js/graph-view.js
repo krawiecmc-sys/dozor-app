@@ -112,6 +112,12 @@ export function createGraphView(containerId) {
     const rodzice = [];
     if (typ === 'poleRozdzielcze') {
       for (const w of platno) {
+        if (w.typ === 'poleRozdzielcze' && w.id !== rekord.id) {
+          // 03.11.2026: przelot 6 kV — pole zasilane z pola innej rozdzielni
+          const r = znajdzRekord('poleRozdzielcze', w.id);
+          if (r && wskazujeNa(rekord.zasilane_z_pola, r, 'p_nazwa')) rodzice.push(w);
+          continue;
+        }
         if (w.typ !== 'rozdzielnie') continue;
         const r = znajdzRekord('rozdzielnie', w.id);
         if (r && wskazujeNa(rekord.miejsce_zabudowy, r, 'nazwa_r')) rodzice.push(w);

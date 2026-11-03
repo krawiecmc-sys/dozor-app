@@ -18,7 +18,7 @@
 // mało — dziesiątki obiektów), zdarzenia przez delegację na <svg>.
 
 import { nadzorGetAll, nadzorUpdate, nadzorAdd, nadzorDelete } from './db.js';
-import { NADZOR_ENTITIES } from './nadzor-entities.js';
+import { NADZOR_ENTITIES, U_RODZAJE } from './nadzor-entities.js';
 import { KOLOR, kolorNapiecia, kv, symbolSvg, napiecieRekordu } from './symbole.js';
 
 const OBIEKTY = [
@@ -34,6 +34,7 @@ const ZASILANIE = {
     ['r_zasilana_z_glowne', 'rozdzielnie', 'nazwa_r', 'kabel'],
     ['r_zasilana_z_rezerwowe', 'rozdzielnie', 'nazwa_r', 'kabel_rez'],
   ],
+  poleRozdzielcze: [['zasilane_z_pola', 'poleRozdzielcze', 'p_nazwa', 'kabel']], // przelot 6 kV
   transformatory: [['zasilany_z_pola', 'poleRozdzielcze', 'p_nazwa', 'kabel']],
   urzadzenia: [
     ['zasilane_z_transformatora', 'transformatory', 't_nr', 'kabel'],
@@ -46,14 +47,39 @@ const ZASILANIE = {
   przenosniki: [['zasilany_z_urzadzenia', 'urzadzenia', 'nazwa', 'kabel']],
 };
 
-// Rodzaje elementow do dodania z planu (03.11.2026): pole nazwy i pole napiecia (te same co w formularzach).
+// Układ zasilania (03.11.2026, Piotr): pole zasila transformator albo inne pole (przelot 6 kV);
+// transformator zasila wyłączniki / aparaty, nie bezpośrednio silniki; wyłącznik zasila kolejny
+// wyłącznik, odbiornik, kombajn albo napęd przenośnika; odbiornik nie zasila niczego.
+const jestOdbiornik = (rec) => String(rec?.u_rodzaj || '').startsWith('odbiornik');
+// rodzaj -> kto może go zasilać: [pole FK, magazyn źródła, rodzaj źródła]
+const ZRODLA_RODZAJU = {
+  rozdzielnie: [['przelot', 'poleRozdzielcze', 'poleRozdzielcze']], // tworzy pole zasilające nowej rozdzielni
+  poleRozdzielcze: [['zasilane_z_pola', 'poleRozdzielcze', 'poleRozdzielcze']],
+  transformatory: [['zasilany_z_pola', 'poleRozdzielcze', 'poleRozdzielcze']],
+  wylacznik: [['zasilane_z_transformatora', 'transformatory', 'transformatory'], ['zasilane_z_urzadzenia', 'urzadzenia', 'wylacznik']],
+  odbiornik: [['zasilane_z_urzadzenia', 'urzadzenia', 'wylacznik']],
+  kb: [['zasilany_z_urzadzenia', 'urzadzenia', 'wylacznik']],
+  przenosniki: [['zasilany_z_urzadzenia', 'urzadzenia', 'wylacznik']],
+};
+const DOMYSLNY_ODPLYW = { poleRozdzielcze: 'transformatory', transformatory: 'wylacznik', wylacznik: 'odbiornik' };
+
+// Rodzaje elementów do dodania z planu: pole nazwy i napięcia (te same co w formularzach).
+const NAP_URZ = { key: 'nap_zas', opcje: ['1 kV', '0,5 kV', '6 kV'] };
 const RODZAJE = [
-  { store: 'rozdzielnie', label: 'Rozdzielnia', nazwa: 'nazwa_r', nap: { key: 'r_napiecie', opcje: ['6 kV', '1 kV', '0,5 kV'] } },
-  { store: 'poleRozdzielcze', label: 'Pole rozdzielcze', nazwa: 'p_nazwa' },
-  { store: 'transformatory', label: 'Transformator', nazwa: 't_nr', nap: { key: 't_napiecie', opcje: ['6/1 kV', '6/0,5 kV', '6/0,5/1 kV'] } },
-  { store: 'urzadzenia', label: 'Urządzenie / aparat', nazwa: 'nazwa', nap: { key: 'nap_zas', opcje: ['1 kV', '0,5 kV', '6 kV'] } },
-  { store: 'kb', label: 'Kombajn / KB', nazwa: 'kb_nazwa' },
-  { store: 'przenosniki', label: 'Przenośnik / napęd', nazwa: 'pr_nr' },
+  { id: 'rozdzielnie', store: 'rozdzielnie', label: 'Rozdzielnia', krotko: 'Rozdzielnia', nazwa: 'nazwa_r', przyklad: 'np. R-650', nap: { key: 'r_napiecie', opcje: ['6 kV', '1 kV', '0,5 kV'] },
+    zasilanyEtykieta: 'Zasilona z pola (przelot 6 kV)', uwaga: 'Przy zasilaniu z pola innej rozdzielni powstanie pole zasilające nowej rozdzielni z kablem przelotowym.' },
+  { id: 'poleRozdzielcze', store: 'poleRozdzielcze', label: 'Pole rozdzielcze', krotko: 'Pole', nazwa: 'p_nazwa', przyklad: 'np. R-650 pole 3',
+    zasilanyEtykieta: 'Zasilane z pola (przelot 6 kV)', uwaga: 'Pole zasila transformator albo — przelotem 6 kV — pole innej rozdzielni.' },
+  { id: 'transformatory', store: 'transformatory', label: 'Transformator', krotko: 'Transformator', nazwa: 't_nr', przyklad: 'np. It3sb 340', nap: { key: 't_napiecie', opcje: ['6/1 kV', '6/0,5 kV', '6/0,5/1 kV'] },
+    zasilanyEtykieta: 'Zasilany z pola', uwaga: 'Transformator zasilany z pola rozdzielczego, zasila wyłączniki / aparaty.' },
+  { id: 'wylacznik', store: 'urzadzenia', label: 'Wyłącznik / aparat (WSN, BTH, OSW…)', krotko: 'Wyłącznik', nazwa: 'nazwa', przyklad: 'np. WSN-40P/1', nap: NAP_URZ, stale: { u_rodzaj: U_RODZAJE[0] },
+    zasilanyEtykieta: 'Zasilany z', uwaga: 'Wyłącznik zasilany z transformatora albo z innego wyłącznika; zasila odbiorniki, kombajn i napędy.' },
+  { id: 'odbiornik', store: 'urzadzenia', label: 'Odbiornik (silnik, pompa, wentylator…)', krotko: 'Odbiornik', nazwa: 'nazwa', przyklad: 'np. pompa PH-1', nap: NAP_URZ, stale: { u_rodzaj: U_RODZAJE[1] },
+    zasilanyEtykieta: 'Zasilany z wyłącznika', uwaga: 'Odbiornik zasilany z wyłącznika — nie bezpośrednio z transformatora.' },
+  { id: 'kb', store: 'kb', label: 'Kombajn / KB', krotko: 'Kombajn', nazwa: 'kb_nazwa', przyklad: 'np. AM-1',
+    zasilanyEtykieta: 'Zasilany z wyłącznika', uwaga: 'Kombajn zasilany z wyłącznika.' },
+  { id: 'przenosniki', store: 'przenosniki', label: 'Przenośnik / napęd', krotko: 'Przenośnik', nazwa: 'pr_nr', przyklad: 'np. 1.6',
+    zasilanyEtykieta: 'Napęd zasilany z wyłącznika', uwaga: 'Napęd przenośnika zasilany z wyłącznika.' },
 ];
 // Znacznik napiecia przy kablu: 6 kV / 1 kV / 0,5 kV
 const znacznikNapiecia = (kV) => (kV === null || kV === undefined ? '' : `${String(+Number(kV).toFixed(2)).replace('.', ',')} kV`);
@@ -434,7 +460,7 @@ export function createPlanView(containerId) {
         }
         x += num(rec.plan_dx) || 0;
         y += num(rec.plan_dy) || 0;
-        poz[`${def.store}:${rec.id}`] = { x, y, lok, def, rec };
+        poz[`${def.store}:${rec.id}`] = { x, y, lok, def: def.store === 'urzadzenia' && jestOdbiornik(rec) ? { ...def, symbol: 'naped' } : def, rec };
       }
     }
     // pola rozdzielcze — rząd kwadracików przy swojej rozdzielni
@@ -617,8 +643,8 @@ export function createPlanView(containerId) {
       ${pozycja('rozdzielnia', 'Rozdzielnia (szyna zbiorcza)', [6, 6])}
       ${pozycja('pole', 'Pole z wyłącznikiem', [6, 6])}
       ${pozycja('transformator', 'Transformator SN/nn')}
-      ${pozycja('urzadzenie', 'Aparat / urządzenie', [1, 1])}
-      ${pozycja('naped', 'Napęd (silnik M)')}
+      ${pozycja('urzadzenie', 'Wyłącznik / aparat', [1, 1])}
+      ${pozycja('naped', 'Odbiornik / napęd (silnik M)')}
       ${pozycja('kombajn', 'Kombajn / KB')}
       ${kabel(KOLOR.sn, 'Kabel SN (6 kV)')}
       ${kabel(KOLOR.nn1, 'Kabel nn 1 kV')}
@@ -641,6 +667,7 @@ export function createPlanView(containerId) {
     const bezKabla = w.kable.filter((k) => !maOpisKabla(k.cel.rec, k.prefiks));
     const niewidoczne = w.kable.filter((k) => !k.narysowany);
     const chodnikiBraki = [...geo.values()].filter((g) => g.brakDanych);
+    const niezgodne = w.kable.filter((k) => !zgodnePolaczenie(k));
     const nazwa = (store, rec) => {
       const d = OBIEKTY.find((o) => o.store === store);
       if (store === 'przenosniki') return `przenośnik ${rec.pr_nr}`;
@@ -653,6 +680,7 @@ export function createPlanView(containerId) {
       blok('Bez położenia na planie', bezPolozenia.map(({ def, rec }) => `<li>${esc(nazwa(def.store, rec))} <button type="button" class="btn-small" data-postaw="${def.store}:${rec.id}">Postaw na planie</button> <button type="button" class="btn-small" data-edytuj="${def.store}:${rec.id}">Edytuj</button></li>`)),
       blok('Przenośniki bez chodnika', przenBez.map((rec) => `<li>${esc(nazwa('przenosniki', rec))} <button type="button" class="btn-small" data-edytuj="przenosniki:${rec.id}">Edytuj</button></li>`)),
       blok('Połączenia bez opisu kabla', bezKabla.map((k) => `<li>${esc(nazwa(k.zrodlo.store, k.zrodlo.rec))} → ${esc(nazwa(k.cel.store, k.cel.rec))}${k.prefiks === 'kabel_rez' ? ' (rezerwowe)' : ''} <button type="button" class="btn-small" data-edytuj="${k.cel.store}:${k.cel.rec.id}">Uzupełnij kabel</button></li>`)),
+      blok('Połączenia niezgodne z układem zasilania', niezgodne.map((k) => `<li>${esc(nazwa(k.zrodlo.store, k.zrodlo.rec))} → ${esc(nazwa(k.cel.store, k.cel.rec))}: ${esc(powodNiezgodnosci(k))} <button type="button" class="btn-small" data-zasilanie="${k.cel.store}:${k.cel.rec.id}">Zmień zasilanie</button></li>`)),
       blok('Kable nienarysowane (jeden z końców bez położenia)', niewidoczne.map((k) => `<li>${esc(nazwa(k.zrodlo.store, k.zrodlo.rec))} → ${esc(nazwa(k.cel.store, k.cel.rec))}</li>`)),
       blok('Zasilanie wpisane tekstem, spoza bazy', w.spozaBazy.map((s) => `<li>${esc(nazwa(s.store, s.rec))}: „${esc(s.opis)}” <button type="button" class="btn-small" data-edytuj="${s.store}:${s.rec.id}">Edytuj</button></li>`)),
       blok('Chodniki bez kierunku lub długości (przyjęto 90° / 100 m)', chodnikiBraki.map((g) => `<li>${esc(g.rec.ch_nazwa)} <button type="button" class="btn-small" data-edytuj="chodniki:${g.rec.id}">Edytuj</button></li>`)),
@@ -692,8 +720,12 @@ export function createPlanView(containerId) {
       ${kabel}
       <div class="form-actions">
         <button type="button" class="btn-small" data-edytuj="${store}:${id}">Edytuj</button>
+        ${store !== 'rozdzielnie' ? `<button type="button" class="btn-small" data-zasilanie="${store}:${id}">Zasilanie…</button>` : ''}
+        ${DOMYSLNY_ODPLYW[rodzajRek(store, rec)] ? `<button type="button" class="btn-small" data-odplyw="${store}:${id}">+ Odpływ stąd</button>` : ''}
+        ${store === 'rozdzielnie' ? `<button type="button" class="btn-small" data-dodaj-pole="${id}">+ Pole</button>` : ''}
         ${store !== 'poleRozdzielcze' && store !== 'przenosniki' ? `<button type="button" class="btn-small" data-postaw="${store}:${id}">Przestaw</button>` : ''}
         ${num(rec.plan_dx) || num(rec.plan_dy) ? `<button type="button" class="btn-small" data-reset="${store}:${id}">Cofnij przesunięcie</button>` : ''}
+        <button type="button" class="btn-small btn-danger" data-usun="${store}:${id}">Usuń</button>
         <button type="button" class="btn-small" data-akcja="zamknij-karte">Zamknij</button>
       </div>`, x, y);
   }
@@ -786,69 +818,146 @@ export function createPlanView(containerId) {
     render();
   }
 
-  // ---------- dodawanie elementu: zasilony z / odpływ do ----------
-  // Wpisuje te same pola "zasilany z" co formularze — połączenie widać od razu na planie, w grafie i w układzie zasilania.
+  // ---------- edycja układu: dodawanie, zasilanie, odpływ, usuwanie ----------
+  // Wpisuje te same pola "zasilany z" co formularze — zmiana widać od razu na planie, w Grafie i w Mapie rejonu.
+  // Listy źródeł i odpływów pokazują tylko połączenia zgodne z układem (ZRODLA_RODZAJU) i bez pętli.
 
   const nazwaRek = (store, rec) => rec[NADZOR_ENTITIES[store]?.titleField] || `#${rec.id}`;
-  const etykietaRodzaju = (store) => (RODZAJE.find((r) => r.store === store) || {}).label || store;
+  const rodzajRek = (store, rec) => (store === 'urzadzenia' ? (jestOdbiornik(rec) ? 'odbiornik' : 'wylacznik') : store);
+  const rodzajDef = (id) => RODZAJE.find((r) => r.id === id);
+  const etykietaRodzaju = (id) => rodzajDef(id)?.krotko || id;
+  const opisRek = (store, rec) => `${etykietaRodzaju(rodzajRek(store, rec))} ${nazwaRek(store, rec)}`;
+  const pusty = (v) => v === undefined || v === null || v === '';
 
-  function zrodlaDla(store) {
-    // [{ wartosc, opis }] — kto może zasilać nowy element
-    if (store === 'poleRozdzielcze') {
-      return (dane.rozdzielnie || []).map((r) => ({ wartosc: `miejsce_zabudowy|rozdzielnie|${r.id}`, opis: `Rozdzielnia ${nazwaRek('rozdzielnie', r)} (pole w tej rozdzielni)` }));
-    }
-    const widziane = new Set();
-    const wynik = [];
-    for (const [pole, zStore] of ZASILANIE[store] || []) {
-      if (widziane.has(zStore)) continue; // rozdzielnia: "zasilony z" = zasilanie główne
-      widziane.add(zStore);
-      for (const r of dane[zStore] || []) wynik.push({ wartosc: `${pole}|${zStore}|${r.id}`, opis: `${etykietaRodzaju(zStore)} ${nazwaRek(zStore, r)}` });
-    }
-    return wynik;
+  function zgodnePolaczenie(p) {
+    if (p.cel.store === 'rozdzielnie') return true; // dawne zasilanie rozdzielnia → rozdzielnia
+    const reguly = ZRODLA_RODZAJU[rodzajRek(p.cel.store, p.cel.rec)] || [];
+    return reguly.some(([, s, r]) => s === p.zrodlo.store && r === rodzajRek(p.zrodlo.store, p.zrodlo.rec));
   }
 
-  function odplywyDla(store) {
-    // [{ wartosc, opis }] — kogo nowy element może zasilać
-    const wynik = [];
-    for (const [cel, reguly] of Object.entries(ZASILANIE)) {
-      const pasujace = reguly.filter(([, zStore]) => zStore === store);
-      if (!pasujace.length) continue;
-      for (const r of dane[cel] || []) {
-        const obecne = pasujace.map(([pole, zStore, zPole]) => rozwiaz(r[pole], dane[zStore] || [], zPole)).find(Boolean);
-        wynik.push({ wartosc: `${cel}|${r.id}`, opis: `${etykietaRodzaju(cel)} ${nazwaRek(cel, r)}${obecne ? ` (teraz z: ${nazwaRek(store, obecne)})` : ''}` });
+  function powodNiezgodnosci(p) {
+    const zr = rodzajRek(p.zrodlo.store, p.zrodlo.rec);
+    const cel = rodzajRek(p.cel.store, p.cel.rec);
+    if (zr === 'transformatory') return 'transformator nie zasila odbiorów bezpośrednio — wstaw wyłącznik';
+    if (zr === 'odbiornik') return 'odbiornik nie zasila innych urządzeń';
+    if (cel === 'odbiornik' || cel === 'kb' || cel === 'przenosniki') return 'zasilanie powinno iść z wyłącznika';
+    return 'niezgodne z układem zasilania';
+  }
+
+  // źródło zasilania głównego rekordu (pierwsze rozpoznane pole "zasilany z")
+  function zrodloRek(store, rec) {
+    for (const [pole, zStore, zPole, prefiks] of ZASILANIE[store] || []) {
+      if (prefiks === 'kabel_rez') continue;
+      const z = rozwiaz(rec[pole], dane[zStore] || [], zPole);
+      if (z) return { store: zStore, rec: z, pole };
+    }
+    return null;
+  }
+  const maWpisaneZasilanie = (store, rec) => (ZASILANIE[store] || []).some(([pole, , , prefiks]) => prefiks !== 'kabel_rez' && !pusty(rec[pole]));
+
+  // ustawia jedno źródło zasilania i czyści pozostałe pola "zasilany z" (urządzenie ma jedno źródło)
+  function zZasilaniem(store, rec, pole, wartosc) {
+    const nowy = { ...rec };
+    if (store !== 'rozdzielnie') for (const [p, , , prefiks] of ZASILANIE[store] || []) if (prefiks !== 'kabel_rez') nowy[p] = '';
+    if (pole) nowy[pole] = wartosc;
+    return nowy;
+  }
+
+  // wszystko, co jest zasilane (pośrednio) z danego elementu — żeby nie zrobić pętli
+  function potomkowie(store, id) {
+    const wynik = new Set();
+    const kolejka = [`${store}:${id}`];
+    const { wynik: pol } = polaczenia();
+    while (kolejka.length) {
+      const k = kolejka.shift();
+      for (const p of pol) {
+        const cel = `${p.cel.store}:${p.cel.rec.id}`;
+        if (`${p.zrodlo.store}:${p.zrodlo.rec.id}` === k && !wynik.has(cel)) {
+          wynik.add(cel);
+          kolejka.push(cel);
+        }
       }
     }
     return wynik;
   }
 
-  function pokazDodawanie(store = 'urzadzenia') {
+  function zrodlaDla(rodzajId, wyklucz = null) {
+    // [{ wartosc: 'poleFK|magazyn|id', opis }] — kto może zasilać element tego rodzaju
+    const zakazane = wyklucz ? potomkowie(wyklucz.store, wyklucz.id) : new Set();
+    if (wyklucz) zakazane.add(`${wyklucz.store}:${wyklucz.id}`);
+    const wynik = [];
+    for (const [pole, zStore, zRodzaj] of ZRODLA_RODZAJU[rodzajId] || []) {
+      for (const r of dane[zStore] || []) {
+        if (rodzajRek(zStore, r) !== zRodzaj || zakazane.has(`${zStore}:${r.id}`)) continue;
+        let opis = `${etykietaRodzaju(zRodzaj)} ${nazwaRek(zStore, r)}`;
+        if (zStore === 'poleRozdzielcze') {
+          const gdzie = rozwiaz(r.miejsce_zabudowy, dane.rozdzielnie || [], 'nazwa_r');
+          if (gdzie && !opis.includes(nazwaRek('rozdzielnie', gdzie))) opis += ` (${nazwaRek('rozdzielnie', gdzie)})`;
+        }
+        wynik.push({ wartosc: `${pole}|${zStore}|${r.id}`, opis });
+      }
+    }
+    return wynik;
+  }
+
+  function odplywyDla(rodzajId) {
+    // [{ wartosc: 'magazyn|id|poleFK', opis }] — kogo nowy element może zasilać
+    const zStore = rodzajDef(rodzajId)?.store;
+    const wynik = [];
+    for (const [celRodzaj, reguly] of Object.entries(ZRODLA_RODZAJU)) {
+      if (celRodzaj === 'rozdzielnie') continue;
+      const regula = reguly.find(([, s, r]) => s === zStore && r === rodzajId);
+      if (!regula) continue;
+      const celStore = rodzajDef(celRodzaj).store;
+      for (const r of dane[celStore] || []) {
+        if (rodzajRek(celStore, r) !== celRodzaj) continue;
+        const obecne = zrodloRek(celStore, r);
+        wynik.push({ wartosc: `${celStore}|${r.id}|${regula[0]}`, opis: `${opisRek(celStore, r)}${obecne ? ` (teraz z: ${nazwaRek(obecne.store, obecne.rec)})` : ''}` });
+      }
+    }
+    return wynik;
+  }
+
+  const opcjeSelect = (lista, pusta, wybrana = '') => (pusta === null ? '' : `<option value="">${pusta}</option>`)
+    + lista.map((o) => `<option value="${esc(o.wartosc)}" ${o.wartosc === wybrana ? 'selected' : ''}>${esc(o.opis)}</option>`).join('');
+
+  let wstepneDodawania = {};
+
+  function pokazDodawanie(rodzajId = 'wylacznik', wstepne = {}) {
     zamknijKarte();
-    const rodzaj = RODZAJE.find((r) => r.store === store) || RODZAJE[3];
-    const opcje = (lista, pusta) => `<option value="">${pusta}</option>` + lista.map((o) => `<option value="${esc(o.wartosc)}">${esc(o.opis)}</option>`).join('');
-    const zrodla = zrodlaDla(rodzaj.store);
-    const odplywy = odplywyDla(rodzaj.store);
+    wstepneDodawania = wstepne;
+    const rodzaj = rodzajDef(rodzajId) || rodzajDef('wylacznik');
+    const jestPole = rodzaj.id === 'poleRozdzielcze';
+    const zrodla = zrodlaDla(rodzaj.id);
+    const wybraneZr = wstepne.zrodlo ? zrodla.find((o) => o.wartosc.endsWith(`|${wstepne.zrodlo.store}|${wstepne.zrodlo.id}`))?.wartosc || '' : '';
+    const odplywy = odplywyDla(rodzaj.id);
+    const rozdzielnie = (dane.rozdzielnie || []).map((r) => ({ wartosc: String(r.id), opis: nazwaRek('rozdzielnie', r) }));
+    dodajEl.dataset.tryb = 'dodaj';
     dodajEl.innerHTML = `
       <h4>Dodaj element do planu</h4>
       <div class="plan-dodaj-pola">
         <label>Rodzaj
-          <select name="rodzaj">${RODZAJE.map((r) => `<option value="${r.store}" ${r.store === rodzaj.store ? 'selected' : ''}>${r.label}</option>`).join('')}</select>
+          <select name="rodzaj">${RODZAJE.map((r) => `<option value="${r.id}" ${r.id === rodzaj.id ? 'selected' : ''}>${r.label}</option>`).join('')}</select>
         </label>
         <label>Nazwa / numer
-          <input name="nazwa" required placeholder="${rodzaj.store === 'przenosniki' ? 'np. 1.6' : 'np. ZT-150'}">
+          <input name="nazwa" required placeholder="${esc(rodzaj.przyklad)}">
         </label>
         ${rodzaj.nap ? `<label>Napięcie
           <select name="napiecie">${rodzaj.nap.opcje.map((o) => `<option>${o}</option>`).join('')}</select>
         </label>` : ''}
-        <label>${rodzaj.store === 'poleRozdzielcze' ? 'W rozdzielni' : 'Zasilony z'}
-          <select name="zrodlo" ${rodzaj.store === 'poleRozdzielcze' ? 'required' : ''}>${opcje(zrodla, zrodla.length ? '— nie podaję —' : '— brak źródeł tego rodzaju —')}</select>
+        ${jestPole ? `<label>W rozdzielni
+          <select name="rozdzielnia" required>${opcjeSelect(rozdzielnie, '— wybierz —', wstepne.rozdzielnia ? String(wstepne.rozdzielnia) : '')}</select>
+        </label>` : ''}
+        <label>${rodzaj.zasilanyEtykieta}
+          <select name="zrodlo">${opcjeSelect(zrodla, zrodla.length ? '— nie podaję —' : '— brak źródeł tego rodzaju —', wybraneZr)}</select>
         </label>
         ${odplywy.length ? `<label>Odpływ do
-          <select name="odplyw">${opcje(odplywy, '— nie podaję —')}</select>
+          <select name="odplyw">${opcjeSelect(odplywy, '— nie podaję —')}</select>
         </label>` : ''}
       </div>
-      <p class="plan-dodaj-uwaga">${rodzaj.store === 'poleRozdzielcze' ? 'Pole stanie przy swojej rozdzielni.' : 'Po zapisie kliknij na planie przy chodniku, gdzie stoi element — metraż i strona wpiszą się same.'} Kabel (typ, przekrój, długość) uzupełnisz później w formularzu.</p>
+      <p class="plan-dodaj-uwaga">${esc(rodzaj.uwaga)} ${jestPole ? 'Pole stanie przy swojej rozdzielni.' : 'Po zapisie kliknij na planie przy chodniku, gdzie stoi element — metraż i strona wpiszą się same.'} Kabel (typ, przekrój, długość) uzupełnisz później w formularzu.</p>
       <div class="form-actions">
-        <button type="submit" class="btn-small btn-primary">Zapisz${rodzaj.store === 'poleRozdzielcze' ? '' : ' i postaw na planie'}</button>
+        <button type="submit" class="btn-small btn-primary">Zapisz${jestPole ? '' : ' i postaw na planie'}</button>
         <button type="button" class="btn-small" data-akcja="anuluj-dodawanie">Anuluj</button>
       </div>`;
     dodajEl.classList.remove('hidden');
@@ -860,28 +969,24 @@ export function createPlanView(containerId) {
 
   async function zapiszDodawanie() {
     const f = new FormData(dodajEl);
-    const store = f.get('rodzaj');
-    const rodzaj = RODZAJE.find((r) => r.store === store);
+    const rodzaj = rodzajDef(f.get('rodzaj'));
     const nazwa = String(f.get('nazwa') || '').trim();
     if (!rodzaj || !nazwa) return;
-    const rec = { [rodzaj.nazwa]: nazwa, zrodlo_danych: 'ręcznie' };
+    const store = rodzaj.store;
+    const rec = { [rodzaj.nazwa]: nazwa, ...(rodzaj.stale || {}), zrodlo_danych: 'ręcznie' };
     if (rodzaj.nap && f.get('napiecie')) rec[rodzaj.nap.key] = f.get('napiecie');
-    const zr = String(f.get('zrodlo') || '');
-    if (zr) {
-      const [pole, , id] = zr.split('|');
-      rec[pole] = Number(id);
-    }
+    if (rodzaj.id === 'poleRozdzielcze') rec.miejsce_zabudowy = Number(f.get('rozdzielnia'));
+    const [pole, , idZr] = String(f.get('zrodlo') || '').split('|');
+    if (idZr && pole !== 'przelot') rec[pole] = Number(idZr);
     const noweId = await nadzorAdd(store, rec);
-    const od = String(f.get('odplyw') || '');
-    if (od) {
-      const [cel, idCelu] = od.split('|');
-      const celRec = (dane[cel] || []).find((r) => r.id === Number(idCelu));
-      const reguly = (ZASILANIE[cel] || []).filter(([, zStore]) => zStore === store);
-      if (celRec && reguly.length) {
-        // rozdzielnia z zajętym zasilaniem głównym dostaje nowy element jako rezerwowe
-        const wolna = reguly.find(([pole]) => celRec[pole] === undefined || celRec[pole] === null || celRec[pole] === '') || reguly[0];
-        await nadzorUpdate(cel, { ...celRec, [wolna[0]]: noweId });
-      }
+    if (idZr && pole === 'przelot') {
+      // rozdzielnia zasilona przelotem: jej pole zasilające z kablem od pola źródłowego
+      await nadzorAdd('poleRozdzielcze', { p_nazwa: `${nazwa} – pole zasilające`, miejsce_zabudowy: noweId, zasilane_z_pola: Number(idZr), zrodlo_danych: 'ręcznie' });
+    }
+    const [celStore, idCelu, celPole] = String(f.get('odplyw') || '').split('|');
+    if (idCelu) {
+      const celRec = (await nadzorGetAll(celStore)).find((r) => r.id === Number(idCelu));
+      if (celRec) await nadzorUpdate(celStore, zZasilaniem(celStore, celRec, celPole, noweId));
     }
     zamknijDodawanie();
     await wczytajDane();
@@ -889,14 +994,105 @@ export function createPlanView(containerId) {
     if (store !== 'poleRozdzielcze') zacznijStawianie(store, noweId);
   }
 
+  // zmiana zasilania (i rodzaju urządzenia) istniejącego elementu
+  function pokazZasilanie(store, id, rodzajUrz = null) {
+    const rec = (dane[store] || []).find((r) => r.id === id);
+    if (!rec || store === 'rozdzielnie') return;
+    zamknijKarte();
+    const rodzajId = rodzajUrz || rodzajRek(store, rec);
+    const zrodla = zrodlaDla(rodzajId, { store, id });
+    const obecne = zrodloRek(store, rec);
+    let wybrana = obecne ? `${obecne.pole}|${obecne.store}|${obecne.rec.id}` : '';
+    let bezZmian = '';
+    if (!zrodla.some((o) => o.wartosc === wybrana) && maWpisaneZasilanie(store, rec)) {
+      // źródło spoza bazy albo niezgodne z układem — nie kasuj go bez wyraźnego wyboru
+      const tekst = obecne ? `${nazwaRek(obecne.store, obecne.rec)} (niezgodne z układem)` : `„${(ZASILANIE[store] || []).map(([p]) => rec[p]).find((v) => !pusty(v))}” (spoza bazy)`;
+      bezZmian = `<option value="__bez_zmian" selected>bez zmian: ${esc(tekst)}</option>`;
+      wybrana = '__bez_zmian';
+    }
+    const def = rodzajDef(rodzajId);
+    dodajEl.dataset.tryb = 'zasilanie';
+    dodajEl.dataset.cel = `${store}:${id}`;
+    dodajEl.innerHTML = `
+      <h4>Zasilanie: ${esc(opisRek(store, rec))}</h4>
+      <div class="plan-dodaj-pola">
+        ${store === 'urzadzenia' ? `<label>Rodzaj urządzenia
+          <select name="u_rodzaj">${U_RODZAJE.map((o) => `<option ${(o === U_RODZAJE[1]) === (rodzajId === 'odbiornik') ? 'selected' : ''}>${o}</option>`).join('')}</select>
+        </label>` : ''}
+        <label>${esc(def?.zasilanyEtykieta || 'Zasilany z')}
+          <select name="zrodlo">${bezZmian}${opcjeSelect(zrodla, '— brak zasilania —', wybrana)}</select>
+        </label>
+      </div>
+      <p class="plan-dodaj-uwaga">${esc(def?.uwaga || '')} Lista pokazuje tylko źródła zgodne z układem, bez elementów zasilanych z tego (bez pętli).</p>
+      <div class="form-actions">
+        <button type="submit" class="btn-small btn-primary">Zapisz</button>
+        <button type="button" class="btn-small" data-akcja="anuluj-dodawanie">Anuluj</button>
+      </div>`;
+    dodajEl.classList.remove('hidden');
+    dodajEl.scrollIntoView({ block: 'nearest' });
+  }
+
+  async function zapiszZasilanie() {
+    const f = new FormData(dodajEl);
+    const [store, id] = String(dodajEl.dataset.cel || '').split(':');
+    const rec = (await nadzorGetAll(store)).find((r) => r.id === Number(id));
+    if (!rec) return;
+    let nowy = { ...rec };
+    if (f.get('u_rodzaj')) nowy.u_rodzaj = f.get('u_rodzaj');
+    const zr = String(f.get('zrodlo') || '');
+    if (zr !== '__bez_zmian') {
+      const [pole, , idZr] = zr.split('|');
+      nowy = zZasilaniem(store, nowy, idZr ? pole : null, idZr ? Number(idZr) : '');
+    }
+    await nadzorUpdate(store, nowy);
+    zamknijDodawanie();
+    await wczytajDane();
+    render();
+  }
+
+  async function usunElement(store, id) {
+    const rec = (dane[store] || []).find((r) => r.id === id);
+    if (!rec) return;
+    const pola = store === 'rozdzielnie' ? (dane.poleRozdzielcze || []).filter((p) => rozwiaz(p.miejsce_zabudowy, dane.rozdzielnie || [], 'nazwa_r')?.id === id) : [];
+    const usuwane = [{ store, rec }, ...pola.map((p) => ({ store: 'poleRozdzielcze', rec: p }))];
+    const klucze = new Set(usuwane.map((d) => `${d.store}:${d.rec.id}`));
+    const odbiory = polaczenia().wynik.filter((p) => klucze.has(`${p.zrodlo.store}:${p.zrodlo.rec.id}`) && !klucze.has(`${p.cel.store}:${p.cel.rec.id}`));
+    const nazwyOdb = [...new Set(odbiory.map((p) => nazwaRek(p.cel.store, p.cel.rec)))];
+    const pytanie = `Usunąć ${opisRek(store, rec)}${pola.length ? ` razem z polami (${pola.length})` : ''}?`
+      + (nazwyOdb.length ? `\n\nZostaną bez zasilania: ${nazwyOdb.join(', ')}.` : '')
+      + '\n\nTego nie da się cofnąć (chyba że masz kopię — Eksport).';
+    if (!confirm(pytanie)) return;
+    for (const p of odbiory) {
+      const swiezy = (await nadzorGetAll(p.cel.store)).find((r) => r.id === p.cel.rec.id);
+      if (!swiezy) continue;
+      const nowy = { ...swiezy };
+      for (const [pole, zStore, zPole] of ZASILANIE[p.cel.store] || []) {
+        const z = rozwiaz(nowy[pole], dane[zStore] || [], zPole);
+        if (z && klucze.has(`${zStore}:${z.id}`)) nowy[pole] = '';
+      }
+      await nadzorUpdate(p.cel.store, nowy);
+    }
+    for (const d of usuwane) await nadzorDelete(d.store, d.rec.id);
+    zamknijKarte();
+    await wczytajDane();
+    render();
+  }
+
   dodajEl.addEventListener('change', (e) => {
-    if (e.target.name === 'rodzaj') {
+    if (dodajEl.dataset.tryb === 'dodaj' && e.target.name === 'rodzaj') {
       const nazwa = dodajEl.querySelector('[name="nazwa"]').value;
-      pokazDodawanie(e.target.value);
+      pokazDodawanie(e.target.value, wstepneDodawania);
       dodajEl.querySelector('[name="nazwa"]').value = nazwa;
+    } else if (dodajEl.dataset.tryb === 'zasilanie' && e.target.name === 'u_rodzaj') {
+      const [store, id] = String(dodajEl.dataset.cel).split(':');
+      pokazZasilanie(store, Number(id), e.target.value === U_RODZAJE[1] ? 'odbiornik' : 'wylacznik');
     }
   });
-  dodajEl.addEventListener('submit', (e) => { e.preventDefault(); zapiszDodawanie(); });
+  dodajEl.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (dodajEl.dataset.tryb === 'zasilanie') zapiszZasilanie();
+    else zapiszDodawanie();
+  });
 
   // ---------- przykładowy rejon (wzór AM-1) ----------
 
@@ -915,7 +1111,7 @@ export function createPlanView(containerId) {
     const t1 = await dodaj('transformatory', { t_nr: 'It3sb 340', t_napiecie: '6/1 kV', zasilany_z_pola: p1, lok_chodnik: ch1, lok_metraz: 190, lok_strona: 'lewa', ...k('K1', '3x50', 200) });
     const t2 = await dodaj('transformatory', { t_nr: 'Mar 439', t_napiecie: '6/1 kV', zasilany_z_pola: p2, lok_chodnik: ch4, lok_metraz: 80, lok_strona: 'lewa', ...k('K2', '3x50', 690) });
     const u = async (nazwa, zT, zU, ch, m, strona, kab) =>
-      dodaj('urzadzenia', { nazwa, nap_zas: '1 kV', zasilane_z_transformatora: zT ?? '', zasilane_z_urzadzenia: zU ?? '', lok_chodnik: ch, lok_metraz: m, lok_strona: strona, ...(kab || {}) });
+      dodaj('urzadzenia', { nazwa, u_rodzaj: nazwa.startsWith('HMC') ? U_RODZAJE[1] : U_RODZAJE[0], nap_zas: '1 kV', zasilane_z_transformatora: zT ?? '', zasilane_z_urzadzenia: zU ?? '', lok_chodnik: ch, lok_metraz: m, lok_strona: strona, ...(kab || {}) });
     const u1 = await u('WSN-40P/1', t1, null, ch2, 150, 'prawa', k('K3', '3x95', 290));
     const u2 = await u('BTH-125', t1, null, ch2, 150, 'prawa', k('K4', '3x70', 290));
     const u3 = await u('RE-22 (1.4)', t2, null, ch3, 190, 'lewa', k('K5', '3x35', 80));
@@ -1053,6 +1249,20 @@ export function createPlanView(containerId) {
       const [store, id] = t.dataset.postaw.split(':');
       zacznijStawianie(store, Number(id));
     }
+    if (t.dataset.zasilanie) {
+      const [store, id] = t.dataset.zasilanie.split(':');
+      pokazZasilanie(store, Number(id));
+    }
+    if (t.dataset.odplyw) {
+      const [store, id] = t.dataset.odplyw.split(':');
+      const rec = (dane[store] || []).find((r) => r.id === Number(id));
+      if (rec) pokazDodawanie(DOMYSLNY_ODPLYW[rodzajRek(store, rec)], { zrodlo: { store, id: Number(id) } });
+    }
+    if (t.dataset.dodajPole) pokazDodawanie('poleRozdzielcze', { rozdzielnia: Number(t.dataset.dodajPole) });
+    if (t.dataset.usun) {
+      const [store, id] = t.dataset.usun.split(':');
+      await usunElement(store, Number(id));
+    }
     if (t.dataset.reset) {
       const [store, id] = t.dataset.reset.split(':');
       const rec = (dane[store] || []).find((r) => r.id === Number(id));
@@ -1188,5 +1398,5 @@ export function createPlanView(containerId) {
     render();
   }
 
-  return { init, _test: { wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
+  return { init, _test: { zrodlaDla, odplywyDla, zgodnePolaczenie, wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
 }

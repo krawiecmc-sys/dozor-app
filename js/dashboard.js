@@ -153,7 +153,7 @@ export async function renderDashboard(containerId, { onEditRecord } = {}) {
         const dalejAncestorIds = new Set(ancestorIds);
         dalejAncestorIds.add(u.id);
         return node(
-          u.symbol ? `Urządzenie: ${u.nazwa} (${u.symbol})` : `Urządzenie: ${u.nazwa}`,
+          `${String(u.u_rodzaj || '').startsWith('odbiornik') ? 'Odbiornik' : 'Wyłącznik / aparat'}: ${u.nazwa}${u.symbol ? ` (${u.symbol})` : ''}`,
           {
             meta: [u.moc ? `${u.moc} kW` : '', u.nap_zas].filter(Boolean).join(' · '),
             expired: hasExpiredZabezpieczenie(u.nastawy_zabezpieczen),
@@ -180,6 +180,22 @@ export async function renderDashboard(containerId, { onEditRecord } = {}) {
       .join('');
   }
 
+  // 03.11.2026: przelot 6 kV pole -> pole (jak na Planie rejonu i w Grafie) — w Mapie jako opis
+  // przy polu, bez zagnieżdżania drugiej rozdzielni (inaczej poddrzewo by się dublowało).
+  function metaPola(p) {
+    const nazwa = (q) => {
+      const r = rozdzielnie.find((x) => wskazujeNa(q.miejsce_zabudowy, x, 'nazwa_r'));
+      return r ? `${q.p_nazwa} (${r.nazwa_r})` : q.p_nazwa;
+    };
+    const z = poleRozdzielcze.find((q) => q.id !== p.id && wskazujeNa(p.zasilane_z_pola, q, 'p_nazwa'));
+    const doPol = poleRozdzielcze.filter((q) => q.id !== p.id && wskazujeNa(q.zasilane_z_pola, p, 'p_nazwa'));
+    return [
+      z ? `przelot z: ${nazwa(z)}` : p.zasilane_z_pola ? `przelot z: ${p.zasilane_z_pola}` : '',
+      doPol.length ? `przelot do: ${doPol.map(nazwa).join(', ')}` : '',
+      p.p_zasilane_z ? `zasilane z: ${p.p_zasilane_z}` : '',
+    ].filter(Boolean).join(' · ');
+  }
+
   function renderPoleFor(rozdzielniaRecord) {
     return poleRozdzielcze
       .filter((p) => wskazujeNa(p.miejsce_zabudowy, rozdzielniaRecord, 'nazwa_r'))
@@ -187,7 +203,7 @@ export async function renderDashboard(containerId, { onEditRecord } = {}) {
         usedIds.poleRozdzielcze.add(p.id);
         return node(
           p.p_nazwa,
-          { meta: p.p_zasilane_z ? `zasilane z: ${p.p_zasilane_z}` : '', entityKey: 'poleRozdzielcze', id: p.id },
+          { meta: metaPola(p), entityKey: 'poleRozdzielcze', id: p.id },
           renderTransformatoryFor(p)
         );
       })
