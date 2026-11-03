@@ -35,10 +35,15 @@ const ZASILANIE = {
     ['r_zasilana_z_rezerwowe', 'rozdzielnie', 'nazwa_r', 'kabel_rez'],
   ],
   poleRozdzielcze: [['zasilane_z_pola', 'poleRozdzielcze', 'p_nazwa', 'kabel']], // przelot 6 kV
-  transformatory: [['zasilany_z_pola', 'poleRozdzielcze', 'p_nazwa', 'kabel']],
+  transformatory: [
+    ['zasilany_z_pola', 'poleRozdzielcze', 'p_nazwa', 'kabel'],
+    ['zasilany_z_transformatora', 'transformatory', 't_nr', 'kabel'], // przelot 6 kV
+    ['zasilany_z_urzadzenia', 'urzadzenia', 'nazwa', 'kabel'], // aparat 6 kV
+  ],
   urzadzenia: [
     ['zasilane_z_transformatora', 'transformatory', 't_nr', 'kabel'],
     ['zasilane_z_urzadzenia', 'urzadzenia', 'nazwa', 'kabel'],
+    ['zasilane_z_pola', 'poleRozdzielcze', 'p_nazwa', 'kabel'], // aparat / pompa 6 kV
   ],
   kb: [
     ['zasilany_z_transformatora', 'transformatory', 't_nr', 'kabel'],
@@ -55,9 +60,12 @@ const jestOdbiornik = (rec) => String(rec?.u_rodzaj || '').startsWith('odbiornik
 const ZRODLA_RODZAJU = {
   rozdzielnie: [['przelot', 'poleRozdzielcze', 'poleRozdzielcze']], // tworzy pole zasilające nowej rozdzielni
   poleRozdzielcze: [['zasilane_z_pola', 'poleRozdzielcze', 'poleRozdzielcze']],
-  transformatory: [['zasilany_z_pola', 'poleRozdzielcze', 'poleRozdzielcze']],
-  wylacznik: [['zasilane_z_transformatora', 'transformatory', 'transformatory'], ['zasilane_z_urzadzenia', 'urzadzenia', 'wylacznik']],
-  odbiornik: [['zasilane_z_urzadzenia', 'urzadzenia', 'wylacznik']],
+  // transformator: z pola, z przelotu 6 kV innego transformatora albo (rzadko) z aparatu 6 kV
+  transformatory: [['zasilany_z_pola', 'poleRozdzielcze', 'poleRozdzielcze'], ['zasilany_z_transformatora', 'transformatory', 'transformatory'], ['zasilany_z_urzadzenia', 'urzadzenia', 'wylacznik']],
+  // wyłącznik / aparat: z transformatora, z innego wyłącznika albo (aparat 6 kV: SK, APST, APSPa — rzadko) z pola
+  wylacznik: [['zasilane_z_transformatora', 'transformatory', 'transformatory'], ['zasilane_z_urzadzenia', 'urzadzenia', 'wylacznik'], ['zasilane_z_pola', 'poleRozdzielcze', 'poleRozdzielcze']],
+  // odbiornik: z wyłącznika; odbiornik 6 kV (pompa odwadniania) wprost z pola
+  odbiornik: [['zasilane_z_urzadzenia', 'urzadzenia', 'wylacznik'], ['zasilane_z_pola', 'poleRozdzielcze', 'poleRozdzielcze']],
   kb: [['zasilany_z_urzadzenia', 'urzadzenia', 'wylacznik']],
   przenosniki: [['zasilany_z_urzadzenia', 'urzadzenia', 'wylacznik']],
 };
@@ -69,9 +77,9 @@ const RODZAJE = [
   { id: 'rozdzielnie', store: 'rozdzielnie', label: 'Rozdzielnia', krotko: 'Rozdzielnia', nazwa: 'nazwa_r', przyklad: 'np. R-650', nap: { key: 'r_napiecie', opcje: ['6 kV', '1 kV', '0,5 kV'] },
     zasilanyEtykieta: 'Zasilona z pola (przelot 6 kV)', uwaga: 'Przy zasilaniu z pola innej rozdzielni powstanie pole zasilające nowej rozdzielni z kablem przelotowym.' },
   { id: 'poleRozdzielcze', store: 'poleRozdzielcze', label: 'Pole rozdzielcze', krotko: 'Pole', nazwa: 'p_nazwa', przyklad: 'np. R-650 pole 3',
-    zasilanyEtykieta: 'Zasilane z pola (przelot 6 kV)', uwaga: 'Pole zasila transformator albo — przelotem 6 kV — pole innej rozdzielni.' },
+    zasilanyEtykieta: 'Zasilane z pola (przelot 6 kV)', uwaga: 'Pole zasila transformatory, rzadko aparat 6 kV (SK, APST, APSPa) albo pompę 6 kV; przelotem — pole innej rozdzielni (każda rozdzielnia ma dwa pola zasilające).' },
   { id: 'transformatory', store: 'transformatory', label: 'Transformator', krotko: 'Transformator', nazwa: 't_nr', przyklad: 'np. It3sb 340', nap: { key: 't_napiecie', opcje: ['6/1 kV', '6/0,5 kV', '6/0,5/1 kV'] },
-    zasilanyEtykieta: 'Zasilany z pola', uwaga: 'Transformator zasilany z pola rozdzielczego, zasila wyłączniki / aparaty.' },
+    zasilanyEtykieta: 'Zasilany z pola', uwaga: 'Transformator zasilany z pola, z przelotu 6 kV innego transformatora albo z aparatu 6 kV; zasila wyłączniki / aparaty i przelotem kolejne transformatory.' },
   { id: 'wylacznik', store: 'urzadzenia', label: 'Wyłącznik / aparat (WSN, BTH, OSW…)', krotko: 'Wyłącznik', nazwa: 'nazwa', przyklad: 'np. WSN-40P/1', nap: NAP_URZ, stale: { u_rodzaj: U_RODZAJE[0] },
     zasilanyEtykieta: 'Zasilany z', uwaga: 'Wyłącznik zasilany z transformatora albo z innego wyłącznika; zasila odbiorniki, kombajn i napędy.' },
   { id: 'odbiornik', store: 'urzadzenia', label: 'Odbiornik (silnik, pompa, wentylator…)', krotko: 'Odbiornik', nazwa: 'nazwa', przyklad: 'np. pompa PH-1', nap: NAP_URZ, stale: { u_rodzaj: U_RODZAJE[1] },
@@ -345,7 +353,10 @@ export function createPlanView(containerId) {
       return kv(r?.r_napiecie) ?? 6;
     }
     if (store === 'transformatory') {
-      const czesci = String(rec.t_napiecie || '').split('/').slice(1).map((x) => kv(x)).filter((x) => x !== null);
+      // przelot 6 kV (do transformatora albo aparatu 6 kV) idzie stroną pierwotną
+      const wszystkie = String(rec.t_napiecie || '').split('/').map((x) => kv(x));
+      if (p.cel.store === 'transformatory' || (kv(p.cel.rec.nap_zas) ?? 0) >= 3) return wszystkie[0] ?? 6;
+      const czesci = wszystkie.slice(1).filter((x) => x !== null);
       return czesci.length ? Math.max(...czesci) : 1;
     }
     return kv(p.cel.rec.nap_zas) ?? kv(rec.nap_zas) ?? 1;

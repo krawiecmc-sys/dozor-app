@@ -63,13 +63,14 @@ try {
   // 2b) Układ zasilania (03.11.2026): pole -> trafo / pole, trafo -> wyłącznik, wyłącznik -> odbiorniki
   const T = plan._test;
   const zr = (r) => T.zrodlaDla(r).map((o) => o.wartosc.split('|')[1]);
-  ok(zr('odbiornik').length > 0 && zr('odbiornik').every((x) => x === 'urzadzenia'), 'odbiornik: źródła tylko wyłączniki, bez transformatorów');
+  ok(zr('odbiornik').length > 0 && !zr('odbiornik').includes('transformatory'), 'odbiornik: z wyłącznika (albo pompa 6 kV z pola), nie z transformatora');
   ok(zr('kb').length === 7 && zr('kb').every((x) => x === 'urzadzenia'), `kombajn: 7 wyłączników jako źródło, bez transformatora i odbiornika HMC (jest ${zr('kb').length})`);
   ok(zr('przenosniki').every((x) => x === 'urzadzenia'), 'napęd przenośnika: tylko z wyłącznika');
-  ok(zr('transformatory').length === 2 && zr('poleRozdzielcze').length === 2 && zr('rozdzielnie').length === 2, 'transformator, pole (przelot) i rozdzielnia: źródłem pola');
-  ok(T.odplywyDla('transformatory').length === 7 && T.odplywyDla('transformatory').every((o) => o.wartosc.startsWith('urzadzenia|')), 'transformator: odpływ tylko do wyłączników (7)');
+  ok(zr('transformatory').filter((x) => x === 'poleRozdzielcze').length === 2 && zr('transformatory').includes('transformatory') && zr('poleRozdzielcze').length === 2 && zr('rozdzielnie').length === 2, 'transformator: z pola albo z przelotu 6 kV transformatora; pole i rozdzielnia: z pola');
+  const odpTr = T.odplywyDla('transformatory').map((o) => o.wartosc.split('|')[0]);
+  ok(odpTr.filter((x) => x === 'urzadzenia').length === 7 && odpTr.includes('transformatory') && !odpTr.includes('kb') && !odpTr.includes('przenosniki'), 'transformator: odpływ do wyłączników (7) i przelotem do transformatorów, nie do kombajnu ani napędu');
   const odpPola = T.odplywyDla('poleRozdzielcze').map((o) => o.wartosc.split('|')[0]);
-  ok(odpPola.includes('transformatory') && odpPola.includes('poleRozdzielcze') && !odpPola.includes('urzadzenia'), 'pole: odpływ do transformatora albo pola (przelot), nie do urządzeń');
+  ok(odpPola.includes('transformatory') && odpPola.includes('poleRozdzielcze') && !odpPola.includes('kb') && !odpPola.includes('przenosniki'), 'pole: odpływ do transformatora, pola (przelot), rzadko aparatu 6 kV; nie do kombajnu ani napędu');
   ok(T.odplywyDla('odbiornik').length === 0, 'odbiornik nie zasila niczego');
   ok(!document.getElementById('plan-braki').textContent.includes('niezgodne'), 'przykład bez połączeń niezgodnych z układem');
   // NaN w geometrii?
@@ -81,6 +82,7 @@ try {
 
   // 4) Import z Excela
   const imp = await import('./js/import-excel.js');
+  const nrKop = imp.nrKop;
   await new Promise((res, rej) => { const s = document.createElement('script'); s.src = './js/vendor/xlsx.full.min.js'; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
   const aoa = [
     ['Wykaz transformatorów — oddział G-1'],
@@ -135,6 +137,74 @@ try {
   ok(!svg.innerHTML.includes('NaN'), 'plan po imporcie bez NaN');
   const wynikRys = plan._test.rysuj();
   ok(wynikRys.kable.length === 16, "połączenia po imporcie nadal 16");
+  // 6) Schemat rozdzielni (dane zmyślone, układ jak w "Całość rozdzielni") + wykaz stacji po nr kopalnianym
+  const S = await import('./js/import-schemat.js');
+  const ark1 = [
+    ['Rozdzielnia:', 'R-10'],
+    ['Pole:', '1', '2', '3', '4'],
+    ['Odpływy:', 'R-20 p.1', 'IT3Sb-400/6/0,5', 'pompa odwodn.', 'R-9 p.3'],
+    ['', '', 'nr 901', 'nr 1a', ''],
+    ['', '', '440 / 2500 A', '', ''],
+    ['', '', 'IT3Sd 400/6/1', '', ''],
+    ['', '', 'nr 902', '', ''],
+    [],
+    ['Rozdzielnia:', 'R-10'],
+    ['5', '6'],
+    ['R-9 p.4', 'APST-250'],
+    ['', 'nr 7'],
+    ['', 'IT3Sb 400/6/0,5'],
+    ['', 'nr 903'],
+    [],
+    ['Rozdzielnia:', 'R-20', '', '', 'Rozdzielnia:', 'ZR-30'],
+    ['Pole:', '1', '2', '3', 'Pole:', 'zasilanie', '1'],
+    ['Odpływy:', 'R-10 p.1', 'R-10 p.9', 'ZR-30', 'Odpływy:', 'R-20 p.3', 'ITp 400/6/0,5'],
+    ['', '', '', '', '', '', 'nr 904'],
+  ];
+  const ark2 = [['Rozdzielnia:', 'R-10'], ['Pole:', '2'], ['Odpływy:', 'IT3Sb-400/6/0,5'], ['', 'nr 999']];
+  ok(S.wygladaNaSchematRozdzielni(ark1) && !S.wygladaNaSchematRozdzielni(aoa), 'schemat rozdzielni rozpoznany (a zwykła tabela nie)');
+  const model = S.parsujSchemat([ark1, ark2]);
+  const sm = S.podsumujSchemat(model);
+  ok(sm.rozdzielnie === 3 && sm.transformatory === 4 && sm.aparaty === 1 && sm.pompy === 1, `schemat: 3 rozdzielnie, 4 transformatory, 1 aparat, 1 pompa (${JSON.stringify(sm)})`);
+  const R10 = model.rozdzielnie.get('R-10');
+  const R20 = model.rozdzielnie.get('R-20');
+  ok(R10.pola.size === 6, `kontynuacja bloku bez "Pole:" wczytana: R-10 ma 6 pól (${R10.pola.size})`);
+  ok(R10.pola.get('4').zrodlo?.zewnetrzne && R10.pola.get('5').zrodlo?.zewnetrzne && R10.pola.get('1').odplywDo === 'R-20 p.1', 'R-10: dwa pola zasilające z R-9 (spoza pliku), pole 1 to odpływ do R-20');
+  ok(R20.pola.get('1').zrodlo?.poleKlucz === '1' && R20.pola.get('1').zrodlo.rozdz === 'R-10', 'R-20 pole 1 zasilane z R-10 pole 1 (kierunek od źródła w głąb)');
+  ok(model.rozdzielnie.get('ZR-30').pola.get('ZASILANIE').zrodlo?.poleKlucz === '3', 'pole nazwane "zasilanie" w ZR-30 zasilane z R-20 pole 3');
+  ok(R10.pola.get('2').uwagi.some((u) => u.startsWith('inny arkusz')), 'to samo pole inaczej w drugim arkuszu: zostaje pierwszy wpis, drugi w uwagach');
+  const w6 = await S.importujSchemat(model);
+  const tr6 = await db.nadzorGetAll('transformatory');
+  const pola6 = await db.nadzorGetAll('poleRozdzielcze');
+  const urz6 = await db.nadzorGetAll('urzadzenia');
+  const t = (k) => tr6.find((x) => x.t_nr_kop === k);
+  const pole = (n) => pola6.find((x) => x.p_nazwa === n);
+  const apst = urz6.find((u) => u.nazwa === 'APST-250 nr 7');
+  ok(t('901')?.zasilany_z_pola === pole('R-10 pole 2')?.id && t('902')?.zasilany_z_transformatora === t('901').id, 'łańcuch: pole → transformator 901 → przelot 6 kV → 902');
+  ok(t('901').t_nastawa_zabezpieczen === '440 / 2500 A' && t('901').t_napiecie === '6/0,5 kV' && t('901').t_moc === 400 && t('902').t_napiecie === '6/1 kV', 'nastawa, napięcie i moc z typu');
+  ok(apst?.zasilane_z_pola === pole('R-10 pole 6')?.id && t('903')?.zasilany_z_urzadzenia === apst.id && apst.nap_zas === '6 kV', 'aparat 6 kV APST z pola, transformator 903 z aparatu');
+  ok(urz6.some((u) => u.nazwa.startsWith('Pompa odwadniania nr 1a') && u.u_rodzaj.startsWith('odbiornik') && u.zasilane_z_pola === pole('R-10 pole 3').id), 'pompa 6 kV jako odbiornik z pola');
+  ok(pole('R-20 pole 1')?.zasilane_z_pola === pole('R-10 pole 1')?.id && pole('R-10 pole 4')?.zasilane_z_pola === 'R-9 p.3', 'przeloty: R-20 p.1 z R-10 p.1; R-10 p.4 z R-9 p.3 (spoza bazy, tekst)');
+  ok(/zasilające \(główne\)/.test(pole('R-10 pole 4').p_przeznaczenie) && /odpływ do R-20 p\.1/.test(pole('R-10 pole 1').p_przeznaczenie), 'przeznaczenie pól: zasilające (główne), odpływ do …');
+  const w6b = await S.importujSchemat(S.parsujSchemat([ark1, ark2]));
+  ok(w6.transformatory[0] === 4 && w6b.transformatory[0] === 0 && w6b.pola[0] === 0 && w6b.rozdzielnie[0] === 0, `ponowny import schematu nie dubluje (${JSON.stringify(w6b)})`);
+  const stacje = [
+    ['', '2024-09-01', '', 'Stacje Transformatorowe'],
+    [],
+    ['L.p.', 'Nr inw', 'TYP Transformatora', 'Moc [kVA]', 'Napięcie [V]', 'Numer Ewid', 'Numer fabryczny', 'Numer kop', 'Dokumentacja', 'UWAGI', 'Rok prod.', 'Stan'],
+    [1, '1-000-1', 'IT3SB 400/6/05', 400, 500, 'X1', 'F-901', 901, 'OPINIA', '', 1987, 'na stanie'],
+    [2, '1-000-2', 'IT3SB 630/6/1N', 630, 1000, 'X2', 'F-905', 905, 'OPINIA', '', 1974, 'Likwidacja'],
+  ];
+  const wn6 = imp.zgadnijWierszNaglowka(stacje);
+  const mapa6 = imp.zgadnijMapowanie(stacje[wn6].map(String));
+  ok(wn6 === 2 && mapa6.t_nr_kop === 7 && mapa6.t_nr_inw === 1 && mapa6.t_nr_ewid === 5 && mapa6.t_stan === 11 && mapa6.t_nr === undefined, `wykaz stacji: kolumny nr kop / inw / ewid / stan (${JSON.stringify(mapa6)})`);
+  const zb6 = imp.zbudujRekordy(stacje.slice(wn6 + 1), mapa6);
+  ok(zb6.rekordy.length === 1 && zb6.pominieteStan === 1 && zb6.rekordy[0].t_nr === 'IT3SB-901' && zb6.rekordy[0].t_napiecie === '6/0,5 kV', 'wykaz stacji: nr z kopalnianego, napięcie z [V], zlikwidowane pominięte');
+  const wi6 = await imp.importuj(zb6.rekordy);
+  const po6 = (await db.nadzorGetAll('transformatory')).filter((x) => nrKop(x) === '901');
+  ok(wi6.zaktualizowane === 1 && po6.length === 1 && po6[0].t_nr_inw === '1-000-1' && po6[0].zasilany_z_pola, 'wykaz stacji dopasowany po nr kopalnianym do transformatora ze schematu (bez duplikatu, połączenie zostało)');
+  ok(imp.nrKop({ t_nr: 'MAR-123' }) === '123' && imp.nrKop({ t_nr: 'IT3Sb-456/1' }) === '456' && imp.nrKop({ t_nr: 'STGCA nr 78' }) === '78' && imp.nrKop({ t_nr: 'STARY-T9' }) === '', 'nr kopalniany z nazw: MAR-123, IT3Sb-456/1, STGCA nr 78');
+  await plan.init({});
+  ok(!svg.innerHTML.includes('NaN'), 'plan po imporcie schematu bez NaN');
   window.__gotowe = true;
 } catch (e) {
   log.push('WYJĄTEK ' + (e && e.stack || e));

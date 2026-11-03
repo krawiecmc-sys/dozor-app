@@ -123,10 +123,13 @@ export function createGraphView(containerId) {
         if (r && wskazujeNa(rekord.miejsce_zabudowy, r, 'nazwa_r')) rodzice.push(w);
       }
     } else if (typ === 'transformatory') {
+      // 03.11.2026: z pola, z przelotu 6 kV innego transformatora albo z aparatu 6 kV
       for (const w of platno) {
-        if (w.typ !== 'poleRozdzielcze') continue;
-        const r = znajdzRekord('poleRozdzielcze', w.id);
-        if (r && wskazujeNa(rekord.zasilany_z_pola, r, 'p_nazwa')) rodzice.push(w);
+        const r = znajdzRekord(w.typ, w.id);
+        if (!r) continue;
+        if (w.typ === 'poleRozdzielcze' && wskazujeNa(rekord.zasilany_z_pola, r, 'p_nazwa')) rodzice.push(w);
+        else if (w.typ === 'transformatory' && w.id !== rekord.id && wskazujeNa(rekord.zasilany_z_transformatora, r, 't_nr')) rodzice.push(w);
+        else if (w.typ === 'urzadzenia' && wskazujeNa(rekord.zasilany_z_urzadzenia, r, 'nazwa')) rodzice.push(w);
       }
     } else if (typ === 'urzadzenia') {
       // Urządzenie może być zasilane z Transformatora ALBO z innego
@@ -140,6 +143,9 @@ export function createGraphView(containerId) {
           if (w.id === rekord.id) continue; // nie rysuj strzałki węzła do samego siebie
           const r = znajdzRekord('urzadzenia', w.id);
           if (r && wskazujeNa(rekord.zasilane_z_urzadzenia, r, 'nazwa')) rodzice.push(w);
+        } else if (w.typ === 'poleRozdzielcze') {
+          const r = znajdzRekord('poleRozdzielcze', w.id);
+          if (r && wskazujeNa(rekord.zasilane_z_pola, r, 'p_nazwa')) rodzice.push(w);
         }
       }
     } else if (typ === 'kb') {

@@ -13,9 +13,61 @@
 // AKTUALIZUJE rekordy zamiast tworzyć duplikaty.
 
 import { nadzorGetAll, nadzorAdd, nadzorUpdate, getMeta, setMeta } from './db.js';
+import { wygladaNaSchematRozdzielni, parsujSchemat, podsumujSchemat, importujSchemat } from './import-schemat.js';
+
+// --- Numer kopalniany: wspólny klucz wykazu stacji, schematu rozdzielni i zabezpieczeń (03.11.2026) ---
+// Jawny (pole t_nr_kop) albo odczytany z nazwy: "MAR-123", "It3sb 340", "IT3Sb-456/1", "STGCA nr 78".
+export function nrKop(t) {
+  if (!t) return '';
+  if (t.t_nr_kop !== undefined && t.t_nr_kop !== null && String(t.t_nr_kop).trim() !== '') return String(t.t_nr_kop).trim();
+  const m = String(t.t_nr || '').match(/(?:^|[-\s]|nr\.?\s*)(\d{1,4})(?:\/\d+)?(?=[\s(]|$)/i);
+  return m ? m[1] : '';
+}
+// "IT3SB 400/6/05" -> "IT3SB", "ITp-400" -> "ITp", "MAR-X-1-400/6/500" -> "MAR"
+export function skrotTypu(typ) {
+  const m = String(typ || '').trim().match(/^[A-Za-z]+\d?[A-Za-z]*/);
+  return m ? m[0] : 'T';
+}
+// "IT3Sb-400/6/0,5" -> "6/0,5 kV", "IT3SB 400/6/1N" -> "6/1 kV", "IT3SCA/b-400/6/0,5/1" -> "6/0,5/1 kV"
+export function napiecieZTypu(typ) {
+  const m = String(typ || '').match(/\/6\/(0[,.]?5|1)N?(\/1)?(?![\d,.])/i);
+  if (!m) return '';
+  if (m[2]) return '6/0,5/1 kV';
+  return m[1] === '1' ? '6/1 kV' : '6/0,5 kV';
+}
+export function mocZTypu(typ) {
+  const m = String(typ || '').match(/(\d{3,4})\s*\/\s*6\b/) || String(typ || '').match(/-(\d{3,4})\b/);
+  return m ? Number(m[1]) : null;
+}
+// Dopasowanie do istniejących: po nr kopalnianym, gdy któraś strona ma go jawnie; inaczej po t_nr.
+export function dopasowanie(istniejace) {
+  const poNr = new Map();
+  const poKop = new Map();
+  const poKopJawny = new Map();
+  const dodaj = (t) => {
+    poNr.set(normNr(t.t_nr), t);
+    const k = nrKop(t);
+    if (k) poKop.set(k, t);
+    if (t.t_nr_kop) poKopJawny.set(String(t.t_nr_kop).trim(), t);
+  };
+  istniejace.forEach(dodaj);
+  const znajdz = (r) => {
+    const jawny = r.t_nr_kop ? String(r.t_nr_kop).trim() : '';
+    if (jawny && poKop.has(jawny)) return poKop.get(jawny);
+    if (!jawny && nrKop(r) && poKopJawny.has(nrKop(r))) return poKopJawny.get(nrKop(r));
+    return poNr.get(normNr(r.t_nr)) || null;
+  };
+  znajdz.dodaj = dodaj;
+  return znajdz;
+}
 
 const POLA = [
-  { key: 't_nr', label: 'Nr transformatora *', wzorce: ['nr transf', 'numer transf', 'nr ewid', 'numer ewid', 'nr inw', 'oznacz', 'nr'] },
+  { key: 't_nr', label: 'Nr transformatora *', wzorce: ['nr transf', 'numer transf', 'oznacz', 'nr'] },
+  { key: 't_nr_kop', label: 'Nr kopalniany', wzorce: ['numer kop', 'nr kop', 'kopal'] },
+  { key: 't_nr_inw', label: 'Nr inwentarzowy', wzorce: ['nr inw', 'numer inw', 'inwent'] },
+  { key: 't_nr_ewid', label: 'Nr ewidencyjny', wzorce: ['ewid'] },
+  { key: 't_dokumentacja', label: 'Dokumentacja', wzorce: ['dokument'] },
+  { key: 't_stan', label: 'Stan', wzorce: ['stan'] },
   { key: 't_typ', label: 'Typ', wzorce: ['typ', 'model', 'rodzaj'] },
   { key: 't_moc', label: 'Moc (kVA)', wzorce: ['moc', 'kva'] },
   { key: 't_napiecie', label: 'Napięcie', wzorce: ['napi', 'kv', 'przekł'] },
@@ -97,7 +149,7 @@ export function zgadnijMapowanie(naglowki, zapamietane = {}) {
   // 2) zgadywanie po fragmentach nazw — najpierw pola o charakterystycznych
   // nazwach, żeby ogólne "nr"/"data"/"typ" nie zabrały np. kolumny
   // "Nr fabryczny" albo "Data produkcji".
-  const KOLEJNOSC = ['t_nr_fabryczny', 't_moc', 't_rok', 't_data_badania', 't_nastawa_zabezpieczen', 't_obciazenie', 't_miejsce_opis', 't_rejon', 't_napiecie', 't_typ', 't_nr', 'uwagi'];
+  const KOLEJNOSC = ['t_nr_kop', 't_nr_inw', 't_nr_ewid', 't_dokumentacja', 't_stan', 't_nr_fabryczny', 't_moc', 't_rok', 't_data_badania', 't_nastawa_zabezpieczen', 't_obciazenie', 't_miejsce_opis', 't_rejon', 't_napiecie', 't_typ', 't_nr', 'uwagi'];
   for (const p of KOLEJNOSC.map((k) => POLA.find((x) => x.key === k))) {
     if (mapa[p.key] !== undefined) continue;
     for (const wz of p.wzorce) {
@@ -115,7 +167,7 @@ export function zgadnijMapowanie(naglowki, zapamietane = {}) {
 // --- Wykaz blokowy "Zabezpieczenia trafo" (03.11.2026) ---
 // Układ pliku (nie tabela!):
 //   AM-1/3                      <- grupa (rejon / oddział), wiersz z samą kolumną A
-//   MAR-572                     <- transformator, wiersz z samą kolumną A
+//   MAR-123                     <- transformator, wiersz z samą kolumną A
 //   PM-2 | nr 28/2018 | data | 220/800A |  | PM-2 | nr 12/2019 | data | 220/1320A
 //         ^ zabezpieczenie 1 (kol. A–D)       ^ zabezpieczenie 2 (kol. F–I)
 // Wiersz "nazwy" po którym następuje wiersz zabezpieczeń = transformator;
@@ -216,9 +268,10 @@ export function scalZabezpieczenia(stare = [], nowe = []) {
 }
 
 // Zamienia wiersze danych na rekordy transformatorów wg mapowania.
-export function zbudujRekordy(wiersze, mapa) {
+export function zbudujRekordy(wiersze, mapa, { pominLikwidacje = true } = {}) {
   const rekordy = [];
   let bezNumeru = 0;
+  let pominieteStan = 0;
   for (const w of wiersze) {
     if (!w || w.every((c) => wartoscKomorki(c) === '')) continue;
     const r = {};
@@ -233,13 +286,26 @@ export function zbudujRekordy(wiersze, mapa) {
       }
       r[p.key] = v;
     }
+    if (r.t_nr_kop !== undefined) r.t_nr_kop = String(r.t_nr_kop).trim();
+    if (!r.t_nr && r.t_nr_kop) r.t_nr = `${skrotTypu(r.t_typ)}-${r.t_nr_kop}`;
+    // "Napięcie [V]": 500 / 1000 -> strona nn; typ "…/6/0,5/1" ma pierwszeństwo
+    if (/^\d+$/.test(String(r.t_napiecie ?? '').trim()) || r.t_napiecie === undefined) {
+      const zTypu = napiecieZTypu(r.t_typ);
+      const v = Number(r.t_napiecie);
+      const zV = v >= 900 && v <= 1200 ? '6/1 kV' : v >= 300 && v < 900 ? '6/0,5 kV' : '';
+      if (zTypu || zV) r.t_napiecie = zTypu || zV;
+    }
     if (!r.t_nr) {
       bezNumeru += 1;
       continue;
     }
+    if (pominLikwidacje && /likwid/i.test(String(r.t_stan || ''))) {
+      pominieteStan += 1;
+      continue;
+    }
     rekordy.push(r);
   }
-  return { rekordy, bezNumeru };
+  return { rekordy, bezNumeru, pominieteStan };
 }
 
 export function createImportExcel(containerId, { onImported } = {}) {
@@ -250,11 +316,11 @@ export function createImportExcel(containerId, { onImported } = {}) {
   let wiersze = [];
   let wierszNagl = 0;
   let mapa = {};
-  let tryb = 'tabela'; // 'tabela' | 'wykaz' (bloki: transformator + zabezpieczenia)
+  let tryb = 'tabela'; // 'tabela' | 'wykaz' (bloki: transformator + zabezpieczenia) | 'schemat' (Całość rozdzielni)
 
   el.innerHTML = `
-    <h3>Import transformatorów z Excela</h3>
-    <p class="field-hint">Wczytuje plik .xlsx / .xls / .csv z wykazem transformatorów. Wskazujesz, która kolumna to numer, typ, moc itd. — appka zapamięta to na następny raz. Rozpoznaje też wykaz „Zabezpieczenia trafo” (grupa → transformator → wiersz z dwoma zabezpieczeniami). Transformator o tym samym numerze zostanie zaktualizowany, nie zdublowany. Plik nigdzie nie jest wysyłany — czytany tylko na tym urządzeniu.</p>
+    <h3>Import z Excela — transformatory, zabezpieczenia, schemat rozdzielni</h3>
+    <p class="field-hint">Wczytuje plik .xlsx / .xls / .csv z wykazem transformatorów. Wskazujesz, która kolumna to numer, typ, moc itd. — appka zapamięta to na następny raz. Rozpoznaje też wykaz „Zabezpieczenia trafo” (grupa → transformator → wiersz z dwoma zabezpieczeniami) i schemat „Całość rozdzielni” (rozdzielnie, pola, przeloty, łańcuchy transformatorów — wszystkie arkusze razem). Transformatory łączą się po numerze kopalnianym. Transformator o tym samym numerze zostanie zaktualizowany, nie zdublowany. Plik nigdzie nie jest wysyłany — czytany tylko na tym urządzeniu.</p>
     <label class="btn-small">
       Wybierz plik Excel
       <input type="file" id="xls-input" accept=".xlsx,.xls,.xlsm,.csv" class="hidden-file-input">
@@ -276,6 +342,7 @@ export function createImportExcel(containerId, { onImported } = {}) {
       <div class="form-field-inline-row">
         <label class="form-field">Układ pliku
           <select id="xls-tryb">
+            <option value="schemat" ${tryb === 'schemat' ? 'selected' : ''}>Schemat rozdzielni (Rozdzielnia → Pole → odpływy; wszystkie arkusze)</option>
             <option value="wykaz" ${tryb === 'wykaz' ? 'selected' : ''}>Wykaz zabezpieczeń (bloki: grupa → transformator → zabezpieczenia)</option>
             <option value="tabela" ${tryb === 'tabela' ? 'selected' : ''}>Zwykła tabela (wiersz = transformator)</option>
           </select>
@@ -290,13 +357,52 @@ export function createImportExcel(containerId, { onImported } = {}) {
     });
   }
 
-  const renderKrok = () => (tryb === 'wykaz' ? renderWykaz() : renderMapowanie());
+  const renderKrok = () => (tryb === 'schemat' ? renderSchemat() : tryb === 'wykaz' ? renderWykaz() : renderMapowanie());
+
+  function arkuszeSchematu() {
+    return skoroszyt.SheetNames
+      .map((n) => window.XLSX.utils.sheet_to_json(skoroszyt.Sheets[n], { header: 1, raw: false, defval: '' }))
+      .filter(wygladaNaSchematRozdzielni);
+  }
+
+  async function renderSchemat() {
+    const arkusze = arkuszeSchematu();
+    const model = parsujSchemat(arkusze);
+    const s = podsumujSchemat(model);
+    krokEl.innerHTML = `
+      ${przelacznikTrybu()}
+      <p class="field-hint">Schemat rozdzielni — arkusze razem (${arkusze.length}): <b>${s.rozdzielnie}</b> rozdzielni, <b>${s.pola}</b> pól,
+        <b>${s.transformatory}</b> transformatorów w łańcuchach${s.bezNumeru ? ` (bez numeru: ${s.bezNumeru})` : ''}, <b>${s.aparaty}</b> aparatów 6 kV, <b>${s.pompy}</b> pomp,
+        <b>${s.przeloty}</b> przelotów pole–pole (pola zasilające: <b>${s.zasilajace}</b>).</p>
+      ${model.uwagi.length ? `<details class="plan-brak"><summary>Do sprawdzenia po imporcie (${model.uwagi.length})</summary><ul>${model.uwagi.map((u) => `<li>${escapeHtml(u)}</li>`).join('')}</ul></details>` : ''}
+      <p class="field-hint">Transformatory łączą się z istniejącymi po numerze kopalnianym (wykaz stacji, zabezpieczenia). Ponowny import aktualizuje, nie dubluje. Kierunek przelotów liczony od rozdzielni spoza pliku — popraw w programie (karta elementu → Zasilanie…).</p>
+      <div class="form-actions">
+        <button type="button" id="xls-import-btn" class="btn-primary" ${s.rozdzielnie ? '' : 'disabled'}>Importuj schemat</button>
+        <button type="button" id="xls-anuluj" class="btn-small">Anuluj</button>
+      </div>`;
+    podepnijTryb();
+    krokEl.querySelector('#xls-anuluj').addEventListener('click', () => {
+      krokEl.innerHTML = '';
+      statusEl.textContent = '';
+      input.value = '';
+    });
+    krokEl.querySelector('#xls-import-btn').addEventListener('click', async (e) => {
+      if (!confirm(`Zaimportować schemat: ${s.rozdzielnie} rozdzielni, ${s.pola} pól, ${s.transformatory} transformatorów?`)) return;
+      e.target.disabled = true;
+      statusEl.textContent = 'Import…';
+      const w = await importujSchemat(model);
+      krokEl.innerHTML = '';
+      input.value = '';
+      statusEl.textContent = `Gotowe: rozdzielnie +${w.rozdzielnie[0]} / zaktualizowane ${w.rozdzielnie[1]}, pola +${w.pola[0]} / ${w.pola[1]}, transformatory +${w.transformatory[0]} / ${w.transformatory[1]}, aparaty i pompy +${w.urzadzenia[0]} / ${w.urzadzenia[1]}. Zobacz Graf zasilania i Mapę rejonu; położenie w chodnikach ustawisz na Planie rejonu.`;
+      if (onImported) await onImported();
+    });
+  }
 
   async function renderWykaz() {
     const { rekordy, uwagi } = parsujWykazBlokowy(wiersze);
     const istniejace = await nadzorGetAll('transformatory');
-    const poNr = new Map(istniejace.map((t) => [normNr(t.t_nr), t]));
-    const doAktualizacji = rekordy.filter((r) => poNr.has(normNr(r.t_nr))).length;
+    const znajdz = dopasowanie(istniejace);
+    const doAktualizacji = rekordy.filter((r) => znajdz(r)).length;
     const zabezp = rekordy.reduce((a, r) => a + r.nastawy_zabezpieczen.length, 0);
     const grupy = [...new Set(rekordy.map((r) => r.t_rejon).filter(Boolean))];
     const opisZ = (z) => [z.nazwa, z.nr ? `nr ${z.nr}` : '', z.nastawa, z.legalizacja].filter(Boolean).join(' · ');
@@ -308,7 +414,7 @@ export function createImportExcel(containerId, { onImported } = {}) {
       <div class="xls-podglad-wrap">
         <table class="xls-podglad">
           <thead><tr><th>Grupa</th><th>Transformator</th><th>Zabezpieczenie 1</th><th>Zabezpieczenie 2</th><th></th></tr></thead>
-          <tbody>${rekordy.map((r) => `<tr><td>${escapeHtml(r.t_rejon)}</td><td><b>${escapeHtml(r.t_nr)}</b></td><td>${escapeHtml(r.nastawy_zabezpieczen[0] ? opisZ(r.nastawy_zabezpieczen[0]) : '—')}</td><td>${escapeHtml(r.nastawy_zabezpieczen[1] ? opisZ(r.nastawy_zabezpieczen[1]) : '—')}</td><td>${poNr.has(normNr(r.t_nr)) ? 'aktualizacja' : 'nowy'}</td></tr>`).join('')}</tbody>
+          <tbody>${rekordy.map((r) => `<tr><td>${escapeHtml(r.t_rejon)}</td><td><b>${escapeHtml(r.t_nr)}</b></td><td>${escapeHtml(r.nastawy_zabezpieczen[0] ? opisZ(r.nastawy_zabezpieczen[0]) : '—')}</td><td>${escapeHtml(r.nastawy_zabezpieczen[1] ? opisZ(r.nastawy_zabezpieczen[1]) : '—')}</td><td>${znajdz(r) ? 'aktualizacja' : 'nowy'}</td></tr>`).join('')}</tbody>
         </table>
       </div>
       ${uwagi.length ? `<p class="field-hint">⚠ ${escapeHtml(uwagi.join('; '))}</p>` : ''}
@@ -341,10 +447,10 @@ export function createImportExcel(containerId, { onImported } = {}) {
       naglowki.map((h, i) => `<option value="${i}" ${wybrana === i ? 'selected' : ''}>${escapeHtml(h)}</option>`).join('');
 
     const dane = wiersze.slice(wierszNagl + 1);
-    const { rekordy, bezNumeru } = zbudujRekordy(dane, mapa);
+    const { rekordy, bezNumeru, pominieteStan } = zbudujRekordy(dane, mapa);
     const istniejace = await nadzorGetAll('transformatory');
-    const poNr = new Map(istniejace.map((t) => [normNr(t.t_nr), t]));
-    const doAktualizacji = rekordy.filter((r) => poNr.has(normNr(r.t_nr))).length;
+    const znajdz = dopasowanie(istniejace);
+    const doAktualizacji = rekordy.filter((r) => znajdz(r)).length;
     const zdublowane = rekordy.length - new Set(rekordy.map((r) => normNr(r.t_nr))).size;
 
     const podglad = rekordy.slice(0, 5);
@@ -370,6 +476,7 @@ export function createImportExcel(containerId, { onImported } = {}) {
       <p class="field-hint">
         Nowe: <b>${rekordy.length - doAktualizacji}</b> · do aktualizacji (ten sam nr): <b>${doAktualizacji}</b>
         ${bezNumeru ? ` · pominięte bez numeru: <b>${bezNumeru}</b>` : ''}
+        ${pominieteStan ? ` · pominięte w likwidacji: <b>${pominieteStan}</b>` : ''}
         ${zdublowane ? ` · ⚠ ten sam numer kilka razy w pliku: <b>${zdublowane}</b> (zostanie ostatni)` : ''}
       </p>
       <div class="form-actions">
@@ -425,7 +532,8 @@ export function createImportExcel(containerId, { onImported } = {}) {
       arkusz = skoroszyt.SheetNames[0];
       wczytajArkusz();
       mapa = {};
-      tryb = wygladaNaWykazBlokowy(wiersze) ? 'wykaz' : 'tabela';
+      const schemat = skoroszyt.SheetNames.some((n) => wygladaNaSchematRozdzielni(XLSX.utils.sheet_to_json(skoroszyt.Sheets[n], { header: 1, raw: false, defval: '' })));
+      tryb = schemat ? 'schemat' : wygladaNaWykazBlokowy(wiersze) ? 'wykaz' : 'tabela';
       statusEl.textContent = `Plik: ${file.name}`;
       await renderKrok();
     } catch (err) {
@@ -437,11 +545,11 @@ export function createImportExcel(containerId, { onImported } = {}) {
 
 export async function importuj(rekordy) {
   const istniejace = await nadzorGetAll('transformatory');
-  const poNr = new Map(istniejace.map((t) => [normNr(t.t_nr), t]));
+  const znajdz = dopasowanie(istniejace);
   const wynik = { dodane: 0, zaktualizowane: 0 };
   const teraz = new Date().toISOString().slice(0, 10);
   for (const r of rekordy) {
-    const stary = poNr.get(normNr(r.t_nr));
+    const stary = znajdz(r);
     if (stary) {
       // Nadpisujemy tylko pola, które w pliku mają wartość — puste komórki
       // nie kasują tego, co user wpisał w appce (np. położenie, kabel).
@@ -451,12 +559,12 @@ export async function importuj(rekordy) {
       if (r.uwagi && stary.uwagi && !String(stary.uwagi).includes(r.uwagi)) nowy.uwagi = `${stary.uwagi}
 ${r.uwagi}`;
       await nadzorUpdate('transformatory', nowy);
-      poNr.set(normNr(r.t_nr), nowy);
+      znajdz.dodaj(nowy);
       wynik.zaktualizowane += 1;
     } else {
       const { _wiersz, ...bez } = r;
       const id = await nadzorAdd('transformatory', { ...bez, zrodlo_danych: 'Excel', import_data: teraz });
-      poNr.set(normNr(r.t_nr), { ...r, id });
+      znajdz.dodaj({ ...r, id });
       wynik.dodane += 1;
     }
   }

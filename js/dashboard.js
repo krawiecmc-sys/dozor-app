@@ -137,21 +137,25 @@ export async function renderDashboard(containerId, { onEditRecord } = {}) {
   // samo siebie), to cykl w danych; bez tej ochrony rekurencja poniżej
   // zawiesiłaby przeglądarkę (crud-module.js NIE blokuje takich pętli przy
   // wypełnianiu formularza — patrz komentarz w nadzor-entities.js).
-  function renderUrzadzeniaFor(parentTyp, parentRecord, ancestorIds = new Set()) {
-    const poleWyswietlaneRodzica = parentTyp === 'transformatory' ? 't_nr' : 'nazwa';
-    const poleZasilania = parentTyp === 'transformatory' ? 'zasilane_z_transformatora' : 'zasilane_z_urzadzenia';
+  // Urządzenie: z transformatora, z innego urządzenia albo (aparat / pompa 6 kV) wprost z pola.
+  // Transformator: z pola, z przelotu 6 kV innego transformatora albo z aparatu 6 kV (03.11.2026).
+  // przodkowie = klucze "typ:id" w tej gałęzi — pętla w danych nie zawiesi przeglądarki
+  // (crud-module.js nie blokuje pętli przy wypełnianiu formularza).
+  const POLE_RODZICA_URZ = { transformatory: ['zasilane_z_transformatora', 't_nr'], urzadzenia: ['zasilane_z_urzadzenia', 'nazwa'], poleRozdzielcze: ['zasilane_z_pola', 'p_nazwa'] };
+  const POLE_RODZICA_TR = { poleRozdzielcze: ['zasilany_z_pola', 'p_nazwa'], transformatory: ['zasilany_z_transformatora', 't_nr'], urzadzenia: ['zasilany_z_urzadzenia', 'nazwa'] };
+
+  function renderUrzadzeniaFor(parentTyp, parentRecord, przodkowie = new Set()) {
+    const [poleZasilania, poleWyswietlaneRodzica] = POLE_RODZICA_URZ[parentTyp];
     return urzadzenia
-      .filter((u) => wskazujeNa(u[poleZasilania], parentRecord, poleWyswietlaneRodzica))
+      .filter((u) => !(parentTyp === 'urzadzenia' && u.id === parentRecord.id) && wskazujeNa(u[poleZasilania], parentRecord, poleWyswietlaneRodzica))
       .map((u) => {
         usedIds.urzadzenia.add(u.id);
-        if (ancestorIds.has(u.id)) {
-          return node(`⚠ ${u.nazwa} — pętla zasilania w danych, popraw ręcznie`, {
-            entityKey: 'urzadzenia',
-            id: u.id,
-          });
+        const klucz = `u:${u.id}`;
+        if (przodkowie.has(klucz)) {
+          return node(`⚠ ${u.nazwa} — pętla zasilania w danych, popraw ręcznie`, { entityKey: 'urzadzenia', id: u.id });
         }
-        const dalejAncestorIds = new Set(ancestorIds);
-        dalejAncestorIds.add(u.id);
+        const dalej = new Set(przodkowie);
+        dalej.add(klucz);
         return node(
           `${String(u.u_rodzaj || '').startsWith('odbiornik') ? 'Odbiornik' : 'Wyłącznik / aparat'}: ${u.nazwa}${u.symbol ? ` (${u.symbol})` : ''}`,
           {
@@ -160,21 +164,33 @@ export async function renderDashboard(containerId, { onEditRecord } = {}) {
             entityKey: 'urzadzenia',
             id: u.id,
           },
-          renderUrzadzeniaFor('urzadzenia', u, dalejAncestorIds) + renderKbFor('urzadzenia', u)
+          renderTransformatoryFor(u, 'urzadzenia', dalej) + renderUrzadzeniaFor('urzadzenia', u, dalej) + renderKbFor('urzadzenia', u)
         );
       })
       .join('');
   }
 
-  function renderTransformatoryFor(poleRecord) {
+  function renderTransformatoryFor(parentRecord, parentTyp = 'poleRozdzielcze', przodkowie = new Set()) {
+    const [poleZasilania, poleWyswietlaneRodzica] = POLE_RODZICA_TR[parentTyp];
     return transformatory
-      .filter((t) => wskazujeNa(t.zasilany_z_pola, poleRecord, 'p_nazwa'))
+      .filter((t) => !(parentTyp === 'transformatory' && t.id === parentRecord.id) && wskazujeNa(t[poleZasilania], parentRecord, poleWyswietlaneRodzica))
       .map((t) => {
         usedIds.transformatory.add(t.id);
+        const klucz = `t:${t.id}`;
+        if (przodkowie.has(klucz)) {
+          return node(`⚠ Transformator ${t.t_nr} — pętla zasilania w danych, popraw ręcznie`, { entityKey: 'transformatory', id: t.id });
+        }
+        const dalej = new Set(przodkowie);
+        dalej.add(klucz);
         return node(
-          `Transformator ${t.t_nr}`,
-          { meta: t.t_napiecie || '', entityKey: 'transformatory', id: t.id },
-          renderKbFor('transformatory', t) + renderUrzadzeniaFor('transformatory', t)
+          `Transformator ${t.t_nr}${parentTyp === 'transformatory' ? ' (przelot 6 kV)' : ''}`,
+          {
+            meta: [t.t_typ, t.t_napiecie, t.t_nastawa_zabezpieczen].filter(Boolean).join(' · '),
+            expired: hasExpiredZabezpieczenie(t.nastawy_zabezpieczen),
+            entityKey: 'transformatory',
+            id: t.id,
+          },
+          renderTransformatoryFor(t, 'transformatory', dalej) + renderKbFor('transformatory', t) + renderUrzadzeniaFor('transformatory', t, dalej)
         );
       })
       .join('');
@@ -190,6 +206,7 @@ export async function renderDashboard(containerId, { onEditRecord } = {}) {
     const z = poleRozdzielcze.find((q) => q.id !== p.id && wskazujeNa(p.zasilane_z_pola, q, 'p_nazwa'));
     const doPol = poleRozdzielcze.filter((q) => q.id !== p.id && wskazujeNa(q.zasilane_z_pola, p, 'p_nazwa'));
     return [
+      p.p_przeznaczenie || '',
       z ? `przelot z: ${nazwa(z)}` : p.zasilane_z_pola ? `przelot z: ${p.zasilane_z_pola}` : '',
       doPol.length ? `przelot do: ${doPol.map(nazwa).join(', ')}` : '',
       p.p_zasilane_z ? `zasilane z: ${p.p_zasilane_z}` : '',
@@ -204,7 +221,7 @@ export async function renderDashboard(containerId, { onEditRecord } = {}) {
         return node(
           p.p_nazwa,
           { meta: metaPola(p), entityKey: 'poleRozdzielcze', id: p.id },
-          renderTransformatoryFor(p)
+          renderTransformatoryFor(p) + renderUrzadzeniaFor('poleRozdzielcze', p)
         );
       })
       .join('');
