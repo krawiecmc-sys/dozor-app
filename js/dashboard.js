@@ -40,6 +40,9 @@ function hasExpiredZabezpieczenie(zabezpieczenia) {
   });
 }
 
+// Elementy, które mają miejsce na Planie rejonu (03.11.2026: przejście Mapa -> Plan)
+const NA_PLANIE = new Set(['rozdzielnie', 'poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb']);
+
 function node(label, { expired = false, meta = '', entityKey = null, id = null } = {}, childrenHtml = '') {
   const clickableAttrs = entityKey ? `data-entity="${entityKey}" data-id="${id}" tabindex="0"` : '';
   const clickableClass = entityKey ? 'dash-clickable' : '';
@@ -49,6 +52,7 @@ function node(label, { expired = false, meta = '', entityKey = null, id = null }
         <span class="dash-node-label">${escapeHtml(label)}</span>
         ${meta ? `<span class="dash-node-meta">${escapeHtml(meta)}</span>` : ''}
         ${expired ? '<span class="dash-node-flag">⚠ legalizacja &gt; 1 rok</span>' : ''}
+        ${entityKey && NA_PLANIE.has(entityKey) ? `<button type="button" class="dash-plan-btn" data-plan="${entityKey}:${id}" title="Pokaż na Planie rejonu">na planie</button>` : ''}
       </div>
       ${childrenHtml ? `<ul class="dash-children">${childrenHtml}</ul>` : ''}
     </li>
@@ -64,7 +68,7 @@ function wskazujeNa(wartosc, rekordRodzica, poleWyswietlaneRodzica) {
   return String(wartosc).trim().toLowerCase() === String(rekordRodzica[poleWyswietlaneRodzica] || '').trim().toLowerCase();
 }
 
-export async function renderDashboard(containerId, { onEditRecord } = {}) {
+export async function renderDashboard(containerId, { onEditRecord, onShowOnPlan } = {}) {
   const container = document.getElementById(containerId);
 
   const [rozdzielnie, poleRozdzielcze, transformatory, urzadzenia, kb, silniki, czujniki] = await Promise.all([
@@ -285,9 +289,19 @@ export async function renderDashboard(containerId, { onEditRecord } = {}) {
       ? rejonySections + orphansHtml
       : '<p class="empty-state">Brak danych do pokazania — dodaj rekordy w zakładce Rejon.</p>';
 
+  container.querySelectorAll('.dash-plan-btn').forEach((b) => {
+    if (!onShowOnPlan) { b.remove(); return; }
+    b.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const [store, id] = b.dataset.plan.split(':');
+      onShowOnPlan(store, Number(id));
+    });
+  });
+
   if (onEditRecord) {
     container.querySelectorAll('.dash-clickable').forEach((el) => {
-      el.addEventListener('click', () => {
+      el.addEventListener('click', (event) => {
+        if (event.target.closest('.dash-plan-btn')) return;
         onEditRecord(el.dataset.entity, Number(el.dataset.id));
       });
       el.addEventListener('keydown', (event) => {

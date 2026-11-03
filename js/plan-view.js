@@ -115,6 +115,7 @@ function rozwiaz(wartosc, rekordy, pole) {
 export function createPlanView(containerId) {
   const container = document.getElementById(containerId);
   let onEditRecord = null;
+  let onShowInMap = null;
   let dane = {};
   let geo = new Map(); // chodnik.id -> geometria w metrach
   let widok = { s: 1.6, tx: 40, ty: 60, dopasowany: false }; // px = m * s + t
@@ -736,6 +737,7 @@ export function createPlanView(containerId) {
         ${store === 'rozdzielnie' ? `<button type="button" class="btn-small" data-dodaj-pole="${id}">+ Pole</button>` : ''}
         ${store !== 'poleRozdzielcze' && store !== 'przenosniki' ? `<button type="button" class="btn-small" data-postaw="${store}:${id}">Przestaw</button>` : ''}
         ${num(rec.plan_dx) || num(rec.plan_dy) ? `<button type="button" class="btn-small" data-reset="${store}:${id}">Cofnij przesunięcie</button>` : ''}
+        ${onShowInMap ? `<button type="button" class="btn-small" data-mapa="${store}:${id}">W Mapie</button>` : ''}
         <button type="button" class="btn-small btn-danger" data-usun="${store}:${id}">Usuń</button>
         <button type="button" class="btn-small" data-akcja="zamknij-karte">Zamknij</button>
       </div>`, x, y);
@@ -1269,6 +1271,11 @@ export function createPlanView(containerId) {
       const rec = (dane[store] || []).find((r) => r.id === Number(id));
       if (rec) pokazDodawanie(DOMYSLNY_ODPLYW[rodzajRek(store, rec)], { zrodlo: { store, id: Number(id) } });
     }
+    if (t.dataset.mapa && onShowInMap) {
+      const [store, id] = t.dataset.mapa.split(':');
+      zamknijKarte();
+      onShowInMap(store, Number(id));
+    }
     if (t.dataset.dodajPole) pokazDodawanie('poleRozdzielcze', { rozdzielnia: Number(t.dataset.dodajPole) });
     if (t.dataset.usun) {
       const [store, id] = t.dataset.usun.split(':');
@@ -1405,9 +1412,42 @@ export function createPlanView(containerId) {
 
   async function init(opts = {}) {
     onEditRecord = opts.onEditRecord || null;
+    onShowInMap = opts.onShowInMap || null;
     await wczytajDane();
     render();
   }
 
-  return { init, _test: { zrodlaDla, odplywyDla, zgodnePolaczenie, wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
+  // Przejście z Mapy rejonu: wycentruj plan na elemencie, zaznacz go i otwórz kartę.
+  // Bez położenia: od razu tryb stawiania (klik przy chodniku); pole — gdy jego rozdzielnia nie stoi na planie.
+  async function pokaz(store, id) {
+    await wczytajDane();
+    render();
+    const rec = (dane[store] || []).find((r) => r.id === id);
+    if (!rec) return false;
+    const p = pozycje[`${store}:${id}`];
+    if (!p) {
+      if (store === 'poleRozdzielcze') {
+        stawianieEl.innerHTML = `<b>${esc(rec.p_nazwa)}</b> pojawi się na planie, gdy jego rozdzielnia stanie przy chodniku. <button type="button" class="btn-small" data-akcja="anuluj-stawianie">OK</button>`;
+        stawianieEl.classList.remove('hidden');
+      } else if ((dane.chodniki || []).length) {
+        zacznijStawianie(store, id);
+      }
+      return false;
+    }
+    const szer = wrapEl.clientWidth || 800;
+    const wys = widok.wys || 500;
+    recznie = true;
+    widok.tx += szer / 2 - p.x;
+    widok.ty += wys / 2 - p.y;
+    render();
+    const q = pozycje[`${store}:${id}`];
+    if (q) {
+      svgEl.insertAdjacentHTML('beforeend', `<circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="${(24 * sk() + 10).toFixed(1)}" fill="none" stroke="#e65100" stroke-width="3" class="plan-wskaz"/>`);
+      pokazKarte(store, id, q.x, q.y);
+    }
+    wrapEl.scrollIntoView({ block: 'nearest' });
+    return true;
+  }
+
+  return { init, pokaz, _test: { zrodlaDla, odplywyDla, zgodnePolaczenie, wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
 }

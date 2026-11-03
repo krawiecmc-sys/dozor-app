@@ -266,6 +266,7 @@ async function refreshActiveNadzorSub() {
         switchNadzorSub('crud');
         await editNadzorRecord(entityKey, id);
       },
+      onShowOnPlan: (entityKey, id) => pokazNaPlanie(entityKey, id),
     });
   } else if (nadzorActiveSub === 'graf') {
     await graphView.init({
@@ -275,12 +276,7 @@ async function refreshActiveNadzorSub() {
       },
     });
   } else if (nadzorActiveSub === 'plan') {
-    await planView.init({
-      onEditRecord: async (entityKey, id) => {
-        switchNadzorSub('crud');
-        await editNadzorRecord(entityKey, id);
-      },
-    });
+    await planView.init(opcjePlanu());
   } else if (nadzorActiveSub === 'diagnostyka') {
     await refreshDiagnostyka();
   } else {
@@ -331,6 +327,33 @@ const nadzorSubAreas = {
 // Wspólna funkcja do przełączania pod-widoku Nadzoru rejonu — używana
 // zarówno przez kliknięcie w pod-przełącznik, jak i przez kliknięcie węzła
 // w dashboardzie (przełącza na "Sprzęt" i otwiera edycję tego rekordu).
+// 03.11.2026: przejścia Mapa rejonu <-> Plan rejonu (te same dane, dwa widoki)
+function opcjePlanu() {
+  return {
+    onEditRecord: async (entityKey, id) => {
+      switchNadzorSub('crud');
+      await editNadzorRecord(entityKey, id);
+    },
+    onShowInMap: (entityKey, id) => pokazWMapie(entityKey, id),
+  };
+}
+
+async function pokazNaPlanie(entityKey, id) {
+  switchNadzorSub('plan');
+  await planView.init(opcjePlanu());
+  await planView.pokaz(entityKey, id);
+}
+
+async function pokazWMapie(entityKey, id) {
+  switchNadzorSub('dashboard');
+  await refreshActiveNadzorSub();
+  const el = document.querySelector(`#dashboard-container .dash-node-row[data-entity="${entityKey}"][data-id="${id}"]`);
+  if (!el) return;
+  document.querySelectorAll('.dash-wskaz').forEach((x) => x.classList.remove('dash-wskaz'));
+  el.classList.add('dash-wskaz');
+  el.scrollIntoView({ block: 'center' });
+}
+
 function switchNadzorSub(subName) {
   nadzorSubSwitchEl.querySelectorAll('.section-btn').forEach((b) => {
     b.classList.toggle('active', b.dataset.sub === subName);

@@ -955,3 +955,9 @@ body.plan-pelny-body { overflow: hidden; }
 
 /* Plan rejonu — przycisk warstw wyraźniej (03.11.2026: Piotr go nie zauważył) */
 .plan-warstwy > summary { font-weight: 600; border: 1px solid var(--accent); }
+
+/* 03.11.2026: przejścia Mapa rejonu <-> Plan rejonu */
+.dash-plan-btn { margin-left: auto; font-size: 0.78rem; padding: 1px 8px; border: 1px solid #b0bec5; border-radius: 10px; background: #fff; color: #37474f; cursor: pointer; }
+.dash-plan-btn:hover { background: #eceff1; }
+.dash-node-row.dash-wskaz { outline: 3px solid #e65100; outline-offset: 1px; }
+.plan-wskaz { pointer-events: none; }
