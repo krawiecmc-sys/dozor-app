@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<title>TEST</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="nadzor-plan-area"><main id="plan-content" style="width:1100px"></main></div>
+<pre id="wynik">trwa…</pre>
+<script type="module">
+const log = [];
+const ok = (warunek, opis) => log.push(`${warunek ? 'OK  ' : 'BŁĄD'} ${opis}`);
+const wynikEl = document.getElementById('wynik');
+try {
+  // 1) Stara baza w wersji 9 z rekordem — czy aktualizacja do 10 go zachowa?
+  await new Promise((res, rej) => {
+    const r = indexedDB.open('dozor-baza-wiedzy', 9);
+    r.onupgradeneeded = () => {
+      const db = r.result;
+      db.createObjectStore('wiedza', { keyPath: 'id' }).createIndex('category', 'category');
+      db.createObjectStore('meta', { keyPath: 'key' });
+      for (const n of ['rozdzielnie','poleRozdzielcze','transformatory','urzadzenia','kb','czujniki','silniki','przegladyBiezace','przegladyOugWug','diagnostykaBaza','diagnostykaAnaliza'])
+        db.createObjectStore(n, { keyPath: 'id', autoIncrement: true });
+    };
+    r.onsuccess = () => {
+      const db = r.result;
+      const tx = db.transaction('transformatory', 'readwrite');
+      tx.objectStore('transformatory').add({ t_nr: 'STARY-T9', t_napiecie: '6/1 kV' });
+      tx.oncomplete = () => { db.close(); res(); };
+      tx.onerror = () => rej(tx.error);
+    };
+    r.onerror = () => rej(r.error);
+  });
+
+  const db = await import('./js/db.js');
+  const t0 = await db.nadzorGetAll('transformatory');
+  ok(t0.length === 1 && t0[0].t_nr === 'STARY-T9', 'migracja 9→10: stary transformator zachowany');
+  ok(Array.isArray(await db.nadzorGetAll('chodniki')) && Array.isArray(await db.nadzorGetAll('przenosniki')), 'migracja 9→10: nowe magazyny chodniki i przenosniki istnieją');
+
+  // 2) Plan rejonu z przykładowego rejonu
+  const { createPlanView } = await import('./js/plan-view.js');
+  const plan = createPlanView('plan-content');
+  await plan.init({});
+  await plan._test.wczytajPrzyklad();
+  await plan.init({});
+  const svg = document.getElementById('plan-svg');
+  const n = (sel) => svg.querySelectorAll(sel).length;
+  ok(n('[data-chodnik]') === 5, `5 chodników narysowanych (jest ${n('[data-chodnik]')})`);
+  ok(n('[data-obiekt^="przenosniki:"]') === 5, `5 napędów (jest ${n('[data-obiekt^="przenosniki:"]')})`);
+  ok(n('[data-obiekt^="urzadzenia:"]') === 8, `8 urządzeń (jest ${n('[data-obiekt^="urzadzenia:"]')})`);
+  ok(n('[data-obiekt^="transformatory:"]') === 3 - 1, `2 transformatory na planie, stary bez położenia (jest ${n('[data-obiekt^="transformatory:"]')})`);
+  ok(n('[data-obiekt^="kb:"]') === 1 && n('[data-obiekt^="rozdzielnie:"]') === 1 && n('[data-obiekt^="poleRozdzielcze:"]') === 2, 'kombajn, rozdzielnia i 2 pola');
+  const kable = n('[data-kabel]');
+  ok(kable === 16, `16 kabli (2 SN + 14 nn) narysowanych (jest ${kable})`);
+  const teksty = [...svg.querySelectorAll('text')].map((t) => t.textContent);
+  ok(teksty.includes('Mifama1100 1.5') && teksty.includes('R-650') && teksty.includes('AM-1'), 'opisy: Mifama1100 1.5, R-650, AM-1');
+  ok(teksty.some((t) => t.startsWith('K2 3x50 690 m')), 'opis kabla K2 3x50 690 m');
+  ok(teksty.filter((t) => t === '? kabel').length === 3, `3 połączenia bez opisu kabla oznaczone "? kabel" (jest ${teksty.filter((t) => t === '? kabel').length})`);
+  const braki = document.getElementById('plan-braki').textContent;
+  ok(braki.includes('Bez położenia na planie (1)') && braki.includes('Połączenia bez opisu kabla (3)'), 'lista braków: 1 bez położenia (STARY-T9), 3 bez kabla');
+  // NaN w geometrii?
+  ok(!svg.innerHTML.includes('NaN'), 'brak NaN w rysunku');
+
+  // 3) Zachowanie pól spoza formularza przy edycji (crud) — symulacja: nadzorUpdate z {...record, ...newRecord}
+  const u = (await db.nadzorGetAll('urzadzenia'))[0];
+  await db.nadzorUpdate('urzadzenia', { ...u, plan_dx: 12, plan_dy: -7 });
+
+  // 4) Import z Excela
+  const imp = await import('./js/import-excel.js');
+  await new Promise((res, rej) => { const s = document.createElement('script'); s.src = './js/vendor/xlsx.full.min.js'; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
+  const aoa = [
+    ['Wykaz transformatorów — oddział G-1'],
+    [],
+    ['Lp.', 'Nr fabryczny', 'Nr transformatora', 'Typ', 'Moc [kVA]', 'Napięcie', 'Rok produkcji', 'Data badania', 'Miejsce zabudowy'],
+    [1, 'F-1001', 'It3sb 340', 'IT3Sb', 630, '6/1 kV', 2015, new Date('2026-03-14'), 'chodnik 1'],
+    [2, 'F-1002', 'Mar 439', 'MAR', '1000', '6/1,2 kV', 2018, new Date('2025-11-02'), 'chodnik 4'],
+    [3, 'F-1003', 'T-NOWY 1', 'IT3Sb', 400, '6/0,5 kV', 2020, '', ''],
+    [4, 'F-1004', '', 'IT3Sb', 400, '', '', '', ''],
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa, { cellDates: true }), 'Arkusz1');
+  const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+  const wb2 = XLSX.read(buf, { type: 'array', cellDates: true });
+  const wiersze = XLSX.utils.sheet_to_json(wb2.Sheets.Arkusz1, { header: 1, raw: true, defval: '' });
+  const wn = imp.zgadnijWierszNaglowka(wiersze);
+  ok(wn === 2, `wiersz nagłówka zgadnięty: ${wn + 1} (Excel)`);
+  const mapa = imp.zgadnijMapowanie(wiersze[wn].map(String));
+  ok(mapa.t_nr === 2 && mapa.t_nr_fabryczny === 1 && mapa.t_moc === 4 && mapa.t_napiecie === 5 && mapa.t_rok === 6 && mapa.t_data_badania === 7 && mapa.t_typ === 3 && mapa.t_miejsce_opis === 8, `mapowanie kolumn: ${JSON.stringify(mapa)}`);
+  const { rekordy, bezNumeru } = imp.zbudujRekordy(wiersze.slice(wn + 1), mapa);
+  ok(rekordy.length === 3 && bezNumeru === 1, `3 rekordy, 1 pominięty bez numeru (${rekordy.length}/${bezNumeru})`);
+  ok(rekordy[0].t_data_badania === '2026-03-14', `data z Excela: ${rekordy[0].t_data_badania}`);
+  const w1 = await imp.importuj(rekordy);
+  ok(w1.dodane === 1 && w1.zaktualizowane === 2, `import 1: dodane ${w1.dodane}, zaktualizowane ${w1.zaktualizowane}`);
+  const w2 = await imp.importuj(rekordy);
+  ok(w2.dodane === 0 && w2.zaktualizowane === 3, `import 2 (ten sam plik): dodane ${w2.dodane}, zaktualizowane ${w2.zaktualizowane} — bez duplikatów`);
+  const tr = await db.nadzorGetAll('transformatory');
+  const mar = tr.find((t) => t.t_nr === 'Mar 439');
+  ok(tr.length === 4, `transformatorów w bazie: ${tr.length} (stary + 2 przykładowe + 1 nowy)`);
+  ok(mar && mar.lok_chodnik && mar.kabel_nr === 'K2' && mar.t_moc === 1000 && mar.t_napiecie === '6/1,2 kV' && mar.zrodlo_danych === 'Excel', 'aktualizacja z Excela zachowała położenie i kabel, dopisała moc i napięcie');
+
+  // 4b) Wykaz blokowy "Zabezpieczenia trafo" (dane zmyślone, układ jak w pliku)
+  const blok = [
+    ['GR-1'], ['TX-1'], ['ZAB-A', 'nr 1/2020', new Date(2020, 0, 15), '220/800A', '', 'UPL-5', 'nr 7', new Date(2020, 1, 3), ''],
+    [], ['TX-2'], ['ZAB-A'], [], ['TX-3'], ['ZAB-A', '', new Date(2021, 4, 1), '346/1600A'],
+    [], ['GR-2'], ['It3sb 340'], ['', 'nr', '', '', '', 'UPL-10', 'nr 9', new Date(2022, 2, 2), ''], ['', '', '', '????'],
+  ];
+  ok(imp.wygladaNaWykazBlokowy(blok), 'wykaz blokowy rozpoznany');
+  const pw = imp.parsujWykazBlokowy(blok);
+  ok(pw.rekordy.length === 4 && pw.rekordy.map((r) => r.t_rejon).join(',') === 'GR-1,GR-1,GR-1,GR-2', `4 transformatory w grupach GR-1/GR-2 (${pw.rekordy.map((r) => r.t_nr + ':' + r.t_rejon).join(' ')})`);
+  ok(pw.rekordy[1].t_nr === 'TX-2' && pw.rekordy[1].nastawy_zabezpieczen.length === 1, 'wiersz z samym typem "ZAB-A" to zabezpieczenie, nie grupa');
+  ok(pw.rekordy[0].nastawy_zabezpieczen[0].nr === '1/2020' && pw.rekordy[0].nastawy_zabezpieczen[0].legalizacja === '2020-01-15' && pw.rekordy[0].nastawy_zabezpieczen[1].nazwa === 'UPL-5', 'zabezpieczenie: nr bez "nr", data, drugie zabezpieczenie z kol. F');
+  const wb3 = await imp.importuj(pw.rekordy);
+  const it = (await db.nadzorGetAll('transformatory')).find((t) => t.t_nr === 'It3sb 340');
+  ok(wb3.zaktualizowane === 1 && it.lok_chodnik && it.t_rejon === 'GR-2' && it.nastawy_zabezpieczen.length === 1 && it.nastawy_zabezpieczen[0].nazwa === 'UPL-10', 'wykaz zaktualizował istniejący It3sb 340 (położenie zostało, doszły zabezpieczenia i grupa)');
+  await imp.importuj(pw.rekordy);
+  const it2 = (await db.nadzorGetAll('transformatory')).find((t) => t.t_nr === 'It3sb 340');
+  ok(it2.nastawy_zabezpieczen.length === 1, 'ponowny import wykazu nie dubluje zabezpieczeń');
+
+  // 5) Plan po imporcie + usunięcie przykładu
+  await plan.init({});
+  ok(!svg.innerHTML.includes('NaN'), 'plan po imporcie bez NaN');
+  const wynikRys = plan._test.rysuj();
+  ok(wynikRys.kable.length === 16, "połączenia po imporcie nadal 16");
+  window.__gotowe = true;
+} catch (e) {
+  log.push('WYJĄTEK ' + (e && e.stack || e));
+}
+wynikEl.textContent = log.join('\n');
+document.title = log.some((l) => !l.startsWith('OK')) ? 'BLEDY' : 'WSZYSTKO-OK';
+</script>
+</body>
+</html>

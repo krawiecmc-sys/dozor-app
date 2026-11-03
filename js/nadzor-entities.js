@@ -32,9 +32,45 @@ function nowForDatetimeLocal() {
 // — patrz crud-module.js/isExpired).
 const ZABEZPIECZENIA_SUBFIELDS = [
   { key: 'nazwa', label: 'Nazwa / rodzaj zabezpieczenia', type: 'text' },
+  { key: 'nr', label: 'Nr', type: 'text' }, // 03.11.2026 — z wykazu zabezpieczeń trafo
   { key: 'nastawa', label: 'Nastawa', type: 'text' },
   { key: 'legalizacja', label: 'Data legalizacji', type: 'date' },
 ];
+
+// --- 03.11.2026: "Plan rejonu" (plan-view.js) ---
+// Położenie obiektu w chodniku (chodnik + metraż + strona) i opis kabla
+// zasilającego. Kabel NIE jest osobną tabelą: kto kogo zasila zostaje w
+// istniejących polach "zasilany z" (jedno źródło prawdy), a kabel to cechy
+// TEGO połączenia, zapisane przy obiekcie zasilanym. Dzięki temu plan i
+// Graf zasilania nie mogą się rozjechać.
+const ZRODLO_DANYCH = { key: 'zrodlo_danych', label: 'Źródło danych', type: 'select', options: ['Excel', 'ręcznie', 'pomiar'], hint: 'Na planie widać, które dane są niepewne (wpisane ręcznie).' };
+
+function poleLokalizacji() {
+  return [
+    { key: '_h_lok', label: 'Położenie na planie rejonu', type: 'heading' },
+    {
+      key: 'lok_chodnik',
+      label: 'Chodnik',
+      type: 'fk-or-free',
+      refStore: 'chodniki',
+      refField: 'ch_nazwa',
+      hint: 'Chodnik, w którym stoi obiekt (zakładka Chodniki). Można też postawić obiekt kliknięciem na Planie rejonu.',
+    },
+    { key: 'lok_metraz', label: 'Metraż od początku chodnika (m)', type: 'number', blank: true },
+    { key: 'lok_strona', label: 'Strona chodnika', type: 'select', options: ['lewa', 'prawa', 'oś'], hint: 'Strona patrząc od początku chodnika w kierunku jego biegu.' },
+  ];
+}
+
+function poleKabla(prefix = 'kabel', naglowek = 'Kabel zasilający (od źródła do tego obiektu)') {
+  return [
+    { key: `_h_${prefix}`, label: naglowek, type: 'heading' },
+    { key: `${prefix}_nr`, label: 'Nr kabla / linii', type: 'text' },
+    { key: `${prefix}_typ`, label: 'Typ kabla', type: 'text' },
+    { key: `${prefix}_przekroj`, label: 'Przekrój (np. 3x95+…)', type: 'text' },
+    { key: `${prefix}_dlugosc`, label: 'Długość (m)', type: 'number', blank: true },
+    { key: `${prefix}_odplyw`, label: 'Odpływ / zacisk w źródle', type: 'text' },
+  ];
+}
 
 export const NADZOR_ENTITIES = {
   rozdzielnie: {
@@ -67,6 +103,11 @@ export const NADZOR_ENTITIES = {
         refField: 'nazwa_r',
         hint: 'Wybierz z listy istniejących rozdzielni albo wpisz ręcznie, jeśli źródło jest poza tą bazą.',
       },
+      { key: 'r_napiecie', label: 'Napięcie rozdzielni', type: 'select', options: ['6 kV', '1 kV', '0,5 kV'] },
+      ...poleLokalizacji(),
+      ...poleKabla('kabel', 'Kabel zasilania głównego'),
+      ...poleKabla('kabel_rez', 'Kabel zasilania rezerwowego'),
+      ZRODLO_DANYCH,
     ],
   },
   poleRozdzielcze: {
@@ -99,8 +140,15 @@ export const NADZOR_ENTITIES = {
     titleField: 't_nr',
     fields: [
       { key: 't_nr', label: 'Nr transformatora', type: 'text', required: true },
+      { key: 't_typ', label: 'Typ', type: 'text' },
+      { key: 't_moc', label: 'Moc (kVA)', type: 'number', blank: true },
       { key: 't_napiecie', label: 'Napięcie', type: 'select', options: ['6/1 kV', '6/0,5 kV', '6/0,5/1 kV'] },
+      { key: 't_nr_fabryczny', label: 'Nr fabryczny', type: 'text' },
+      { key: 't_rok', label: 'Rok produkcji', type: 'text' },
+      { key: 't_data_badania', label: 'Data ostatniego badania', type: 'date' },
+      { key: 't_rejon', label: 'Rejon / grupa (np. AM-1/3)', type: 'text' },
       { key: 't_nastawa_zabezpieczen', label: 'Nastawa zabezpieczeń', type: 'text' },
+      { key: 'nastawy_zabezpieczen', label: 'Zabezpieczenia (typ, nr, nastawa, data)', type: 'sublist', subFields: ZABEZPIECZENIA_SUBFIELDS },
       { key: 't_obciazenie', label: 'Wartość obciążeniowa', type: 'text' },
       {
         key: 'zasilany_z_pola',
@@ -110,6 +158,11 @@ export const NADZOR_ENTITIES = {
         refField: 'p_nazwa',
         hint: 'Wybierz z listy istniejących pól rozdzielczych albo wpisz nazwę ręcznie.',
       },
+      { key: 't_miejsce_opis', label: 'Miejsce zabudowy (opis, np. z Excela)', type: 'text' },
+      ...poleLokalizacji(),
+      ...poleKabla(),
+      ZRODLO_DANYCH,
+      { key: 'uwagi', label: 'Uwagi', type: 'textarea' },
     ],
   },
   // Dodane 01.09.2026 — sprzęt kopalniany (wyłączniki, szafy stycznikowe,
@@ -152,6 +205,9 @@ export const NADZOR_ENTITIES = {
         hint: 'Wypełnij TO pole, jeśli urządzenie jest zasilane z innego urządzenia (np. pompa z szafy stycznikowej), a nie bezpośrednio z transformatora.',
       },
       { key: 'nastawy_zabezpieczen', label: 'Nastawy zabezpieczeń', type: 'sublist', subFields: ZABEZPIECZENIA_SUBFIELDS },
+      ...poleLokalizacji(),
+      ...poleKabla(),
+      ZRODLO_DANYCH,
     ],
   },
   kb: {
@@ -199,6 +255,65 @@ export const NADZOR_ENTITIES = {
         refLabelFields: ['nazwa_czujnik'],
       },
       { key: 'nastawy_zabezpieczen', label: 'Nastawy zabezpieczeń', type: 'sublist', subFields: ZABEZPIECZENIA_SUBFIELDS },
+      ...poleLokalizacji(),
+      ...poleKabla(),
+      ZRODLO_DANYCH,
+    ],
+  },
+  // 03.11.2026: chodniki wracają (usunięte 31.08.2026 jako "chodnikiTrasy")
+  // w prostszej postaci — tylko geometria do Planu rejonu: skąd wychodzi,
+  // w którą stronę i jak długi. Trasa kabla wynika z położenia obiektów.
+  chodniki: {
+    label: 'Chodniki',
+    labelSingular: 'chodnik',
+    titleField: 'ch_nazwa',
+    fields: [
+      { key: 'ch_nazwa', label: 'Nazwa chodnika', type: 'text', required: true },
+      {
+        key: 'ch_od_chodnika',
+        label: 'Odchodzi od chodnika',
+        type: 'fk-or-free',
+        refStore: 'chodniki',
+        refField: 'ch_nazwa',
+        hint: 'Puste = chodnik początkowy rejonu (rysowany od punktu startowego).',
+      },
+      { key: 'ch_od_metraz', label: 'W metrażu tamtego chodnika (m)', type: 'number', blank: true },
+      {
+        key: 'ch_azymut',
+        label: 'Kierunek na rysunku (stopnie)',
+        type: 'number',
+        blank: true,
+        hint: '0 = w górę rysunku, 90 = w prawo, 180 = w dół, 270 = w lewo. Może być dowolny kąt, np. 150.',
+      },
+      { key: 'ch_dlugosc', label: 'Długość (m)', type: 'number', blank: true },
+      { key: 'ch_w_drazeniu', label: 'W drążeniu (przodek na końcu)', type: 'select', options: ['nie', 'tak'] },
+      { key: 'uwagi', label: 'Uwagi', type: 'textarea' },
+    ],
+  },
+  // 03.11.2026: przenośnik z napędem (napęd = punkt na przenośniku, nie
+  // osobny rekord — numer napędu to numer przenośnika, np. 1.3).
+  przenosniki: {
+    label: 'Przenośniki',
+    labelSingular: 'przenośnik',
+    titleField: 'pr_nr',
+    fields: [
+      { key: 'pr_nr', label: 'Nr przenośnika / napędu (np. 1.3)', type: 'text', required: true },
+      { key: 'pr_typ', label: 'Typ (np. Pt1000, Mifama 1100)', type: 'text' },
+      { key: 'pr_chodnik', label: 'Chodnik', type: 'fk-or-free', refStore: 'chodniki', refField: 'ch_nazwa' },
+      { key: 'pr_od_m', label: 'Od metrażu (m)', type: 'number', blank: true },
+      { key: 'pr_do_m', label: 'Do metrażu (m)', type: 'number', blank: true },
+      { key: 'pr_naped_m', label: 'Napęd w metrażu (m)', type: 'number', blank: true, hint: 'Puste = na końcu "do metrażu".' },
+      { key: 'pr_moc', label: 'Moc napędu (kW)', type: 'number', blank: true },
+      {
+        key: 'zasilany_z_urzadzenia',
+        label: 'Napęd zasilany z (urządzenie)',
+        type: 'fk-or-free',
+        refStore: 'urzadzenia',
+        refField: 'nazwa',
+      },
+      ...poleKabla(),
+      ZRODLO_DANYCH,
+      { key: 'uwagi', label: 'Uwagi', type: 'textarea' },
     ],
   },
   czujniki: {
@@ -235,7 +350,7 @@ export const NADZOR_ENTITIES = {
         key: 'typObiektu',
         label: 'Typ obiektu',
         type: 'select',
-        options: ['Rozdzielnia', 'Pole rozdzielcze', 'Transformator', 'Urządzenie', 'KB', 'Silnik', 'Czujnik'],
+        options: ['Rozdzielnia', 'Pole rozdzielcze', 'Transformator', 'Urządzenie', 'KB', 'Silnik', 'Czujnik', 'Przenośnik', 'Chodnik'],
       },
       { key: 'obiekt', label: 'Obiekt (nr / nazwa)', type: 'text', required: true },
       { key: 'wynik', label: 'Wynik', type: 'select', options: ['OK', 'Usterka', 'Do ponownego sprawdzenia'] },

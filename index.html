@@ -46,6 +46,7 @@
   <nav id="nadzor-sub-switch" class="section-switch section-switch-secondary">
     <button class="section-btn active" data-sub="dashboard">Mapa rejonu</button>
     <button class="section-btn" data-sub="graf">Graf zasilania</button>
+    <button class="section-btn" data-sub="plan">Plan rejonu</button>
     <button class="section-btn" data-sub="crud">Rejon</button>
     <button class="section-btn" data-sub="ougwug">Przegląd OUG/WUG</button>
     <button class="section-btn" data-sub="diagnostyka">Diagnostyka</button>
@@ -75,6 +76,10 @@
 
   <div id="nadzor-graf-area" class="hidden">
     <main id="graf-content"></main>
+  </div>
+
+  <div id="nadzor-plan-area" class="hidden">
+    <main id="plan-content"></main>
   </div>
 
   <div id="nadzor-diagnostyka-area" class="hidden">
@@ -124,6 +129,8 @@
       </label>
       <p id="sync-import-status" class="field-hint"></p>
     </div>
+
+    <div class="sync-block" id="import-excel-block"></div>
 
     <div class="sync-block">
       <h3>Kontrola integralności</h3>

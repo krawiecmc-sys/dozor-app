@@ -12,6 +12,13 @@ Kontekst decyzji i pełne ustalenia: `Notatki/sesje/2026-08-02.md` i `Zadania/w_
 2. **Diagnostyka** — Baza (opisane, rozwiązane przypadki problemów produkcyjno-technologicznych) i Analiza (bieżący problem w trakcie diagnozy).
 3. **Baza wiedzy** — Przepisy prawne, Normy techniczne, Wzory dokumentów, Schematy uniwersalne, Dokumentacja techniczna, Urządzenia. W pełni edytowalna przez UI (nie tylko `seed-data.js`).
 
+## Plan rejonu i import z Excela (03.11.2026)
+
+- **Dashboard → Plan rejonu** — schematyczny plan oddziału (wzór: „plan rejonu dla kombajnu chodnikowego”): chodniki z kierunkami (strzałka przodka), przenośniki z napędami i numerami, rozdzielnie z polami, transformatory, urządzenia, KB, kable zasilające wzdłuż chodników (SN czerwone, nn pomarańczowe, opis: nr · typ · przekrój · długość). Przesuwanie/przybliżanie (mysz, dwa palce), klik = karta obiektu/kabla, przeciąganie symbolu = poprawka rysunku (`plan_dx/plan_dy`, nie zmienia metrażu), „Postaw na planie” = metraż i strona wpisują się z kliknięcia, druk A3/PDF, zapis SVG, lista braków (bez położenia, połączenia bez opisu kabla, zasilanie spoza bazy).
+- **Dane:** nowe tabele `chodniki` i `przenosniki` (baza v10 — migracja tylko dodaje magazyny); przy rozdzielniach/transformatorach/urządzeniach/KB pola położenia (`lok_*`) i kabla (`kabel_*`). Kto kogo zasila — nadal tylko w polach „zasilany z” (jedno źródło prawdy dla Grafu i Planu).
+- **Synchronizacja → Import transformatorów z Excela** (SheetJS 0.20.3 w `js/vendor/`, offline): zwykła tabela z dopasowaniem kolumn (zapamiętywane) albo wykaz „Zabezpieczenia trafo” (grupa → transformator → wiersz z dwoma zabezpieczeniami). Dopasowanie po numerze transformatora — ponowny import aktualizuje, nie dubluje; puste komórki nie kasują danych z appki.
+- **Testy:** `testy-plan.html` (dane zmyślone; otwórz przez lokalny serwer) — migracja 9→10, rysunek, import tabeli i wykazu, brak duplikatów.
+
 ## Zabezpieczenia w danych — ważna zasada
 
 Dane operacyjne (Nadzór rejonu) i tak jest to warstwa zakładowa co do zasady, ale appka **zawiera wyłącznie treści przykładowe/fikcyjne** (oznaczone `PRZYKŁAD`) — żadnych realnych numerów, nastaw, identyfikatorów z KWK Piast, dopóki nie zostanie potwierdzona zgodność z polityką bezpieczeństwa/IT pracodawcy. Patrz uzasadnienie w `Zadania/w_trakcie/aplikacja-dozor-baza-wiedzy-pwa.md`.

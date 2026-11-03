@@ -805,3 +805,112 @@ body {
   font-size: 0.85rem;
   margin-top: 0.75rem;
 }
+
+/* Formularze: nagłówki sekcji (03.11.2026, Plan rejonu) */
+.form-heading {
+  margin: 1.2rem 0 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--grey-dark);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--grey-dark);
+}
+
+/* Plan rejonu (03.11.2026) */
+.plan-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.75rem 1rem 0.5rem;
+  align-items: flex-start;
+}
+.plan-warstwy { position: relative; }
+.plan-warstwy summary { list-style: none; cursor: pointer; display: inline-block; }
+.plan-warstwy summary::-webkit-details-marker { display: none; }
+.plan-warstwy[open] { z-index: 5; }
+.plan-warstwy label {
+  display: block;
+  font-size: 0.85rem;
+  padding: 0.25rem 0.5rem;
+  background: var(--white);
+  white-space: nowrap;
+}
+.plan-warstwy[open] > label:first-of-type { margin-top: 0.3rem; border-radius: 8px 8px 0 0; }
+.plan-warstwy[open] > label:last-of-type { border-radius: 0 0 8px 8px; padding-bottom: 0.5rem; }
+.plan-baner, .plan-stawianie {
+  margin: 0 1rem 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+.plan-baner { background: #fff3cd; color: #5c4400; }
+.plan-stawianie { background: #d9efff; color: var(--navy); }
+.plan-wrap {
+  position: relative;
+  margin: 0 1rem;
+  border: 1px solid #c9d1d8;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #ffffff;
+  touch-action: none;
+}
+.plan-wrap svg { display: block; cursor: grab; user-select: none; }
+.plan-wrap svg:active { cursor: grabbing; }
+.plan-tryb-stawiania svg, .plan-tryb-stawiania svg:active { cursor: crosshair; }
+.plan-klik { cursor: pointer; }
+.plan-karta {
+  position: absolute;
+  z-index: 4;
+  width: 290px;
+  max-width: calc(100% - 12px);
+  max-height: 70%;
+  overflow: auto;
+  background: var(--white);
+  border: 1px solid #c9d1d8;
+  border-left: 4px solid #1a7f1a;
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  box-shadow: 0 6px 18px rgba(11, 31, 51, 0.18);
+  font-size: 0.85rem;
+}
+.plan-karta h4 { margin: 0 0 0.4rem; font-size: 0.95rem; }
+.plan-karta table { border-collapse: collapse; width: 100%; }
+.plan-karta th { text-align: left; font-weight: 600; color: var(--grey-dark); padding: 0.15rem 0.4rem 0.15rem 0; vertical-align: top; width: 45%; }
+.plan-karta td { padding: 0.15rem 0; word-break: break-word; }
+.plan-karta .form-actions { margin-top: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.plan-karta-kabel { margin: 0.4rem 0 0; color: #8a5a00; }
+.plan-legenda {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  padding: 0.6rem 1rem;
+  font-size: 0.8rem;
+}
+.plan-leg { display: inline-flex; align-items: center; gap: 0.35rem; }
+.plan-braki { padding: 0 1rem; }
+.plan-brak {
+  background: var(--white);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+}
+.plan-brak summary { cursor: pointer; font-weight: 600; }
+.plan-brak ul { margin: 0.4rem 0 0; padding-left: 1.1rem; }
+.plan-brak li { margin-bottom: 0.3rem; }
+.plan-brak li .btn-small { padding: 0.15rem 0.5rem; font-size: 0.8rem; margin-left: 0.25rem; }
+.plan-pusty { background: var(--white); border-radius: 8px; padding: 0.75rem 1rem; font-size: 0.9rem; }
+
+/* Import z Excela (03.11.2026) */
+.xls-krok { margin-top: 0.75rem; }
+.xls-mapa {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0 0.75rem;
+}
+.form-field-inline-row { display: flex; flex-wrap: wrap; gap: 0 0.75rem; }
+.xls-podglad-wrap { overflow-x: auto; }
+.xls-podglad { border-collapse: collapse; font-size: 0.8rem; min-width: 100%; }
+.xls-podglad th, .xls-podglad td { border: 1px solid #c9d1d8; padding: 0.2rem 0.4rem; text-align: left; white-space: nowrap; }
+.xls-podglad th { background: var(--grey); }

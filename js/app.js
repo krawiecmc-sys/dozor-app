@@ -7,11 +7,14 @@ import { initSync, runIntegrityCheck } from './sync.js';
 import { checkExportReminder } from './export-reminder.js';
 import { renderDashboard } from './dashboard.js';
 import { createGraphView } from './graph-view.js';
+import { createPlanView } from './plan-view.js';
+import { createImportExcel } from './import-excel.js';
 // Kreator łańcucha (chain-builder.js) usunięty 31.08.2026 (Faza 2 reorganizacji)
 // — odwoływał się do starego schematu, zastąpiony formularzami z realnymi
 // kluczami (Faza 1) i widokiem graficznym poniżej (Faza 4).
 
 const graphView = createGraphView('graf-content');
+const planView = createPlanView('plan-content');
 
 // Kategorie "Wszystko"/"Normy techniczne"/"Schematy uniwersalne" usunięte
 // z nawigacji 31.08.2026 (na wyraźną prośbę — mniej odnośników do
@@ -271,6 +274,13 @@ async function refreshActiveNadzorSub() {
         await editNadzorRecord(entityKey, id);
       },
     });
+  } else if (nadzorActiveSub === 'plan') {
+    await planView.init({
+      onEditRecord: async (entityKey, id) => {
+        switchNadzorSub('crud');
+        await editNadzorRecord(entityKey, id);
+      },
+    });
   } else if (nadzorActiveSub === 'diagnostyka') {
     await refreshDiagnostyka();
   } else {
@@ -308,12 +318,14 @@ const nadzorOugwugAreaEl = document.getElementById('nadzor-ougwug-area');
 const nadzorDashboardAreaEl = document.getElementById('nadzor-dashboard-area');
 const nadzorDiagnostykaAreaEl = document.getElementById('nadzor-diagnostyka-area');
 const nadzorGrafAreaEl = document.getElementById('nadzor-graf-area');
+const nadzorPlanAreaEl = document.getElementById('nadzor-plan-area');
 const nadzorSubAreas = {
   crud: nadzorCrudAreaEl,
   ougwug: nadzorOugwugAreaEl,
   dashboard: nadzorDashboardAreaEl,
   diagnostyka: nadzorDiagnostykaAreaEl,
   graf: nadzorGrafAreaEl,
+  plan: nadzorPlanAreaEl,
 };
 
 // Wspólna funkcja do przełączania pod-widoku Nadzoru rejonu — używana
@@ -357,6 +369,12 @@ async function init() {
     },
     onExported: async () => {
       exportReminderEl.classList.add('hidden');
+    },
+  });
+
+  createImportExcel('import-excel-block', {
+    onImported: async () => {
+      await refreshNadzor();
     },
   });
 

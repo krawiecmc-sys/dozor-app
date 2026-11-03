@@ -133,7 +133,7 @@ export function createCrudModule({ entities, examples = {}, tabsId, listId, form
     listEl.innerHTML = `<ul class="record-list">${records
       .map((r) => {
         const otherFields = def.fields
-          .filter((f) => f.key !== def.titleField)
+          .filter((f) => f.key !== def.titleField && f.type !== 'heading')
           .map((f) => {
             if (f.type === 'sublist') return renderSublistSummary(f, r[f.key]);
             if (f.type === 'fk-or-free') return renderFkOrFreeSummary(f, r[f.key], refCache);
@@ -179,7 +179,10 @@ export function createCrudModule({ entities, examples = {}, tabsId, listId, form
     const extraAttr = attrsOverride?.extra || '';
 
     if (f.type === 'select') {
-      const options = f.options
+      // 03.11.2026: wartość spoza listy (np. z importu Excela) nie może
+      // zniknąć przy edycji — dokładana jako dodatkowa opcja.
+      const opcje = value && !f.options.includes(value) ? [...f.options, value] : f.options;
+      const options = opcje
         .map((opt) => `<option value="${escapeHtml(opt)}" ${opt === value ? 'selected' : ''}>${escapeHtml(opt)}</option>`)
         .join('');
       return `
@@ -378,6 +381,7 @@ export function createCrudModule({ entities, examples = {}, tabsId, listId, form
 
     const fieldsHtml = def.fields
       .map((f) => {
+        if (f.type === 'heading') return `<h4 class="form-heading">${escapeHtml(f.label)}</h4>`;
         if (f.type === 'sublist') return renderSublistEditor(f);
         if (f.type === 'fk-or-free') return renderFkOrFreeEditor(f, record[f.key], refRecordsByField[f.key]);
         if (f.type === 'fk-multi') return renderFkMultiEditor(f, record[f.key], refRecordsByField[f.key]);
@@ -426,6 +430,7 @@ export function createCrudModule({ entities, examples = {}, tabsId, listId, form
       const formData = new FormData(event.target);
       const newRecord = {};
       for (const f of def.fields) {
+        if (f.type === 'heading') continue;
         if (f.type === 'sublist') {
           newRecord[f.key] = (sublistState[f.key] || []).filter((row) =>
             f.subFields.some((sf) => row[sf.key])
@@ -441,17 +446,26 @@ export function createCrudModule({ entities, examples = {}, tabsId, listId, form
           continue;
         }
         const raw = formData.get(f.key);
-        newRecord[f.key] = f.type === 'number' ? Number(raw) || 0 : raw?.trim() ?? '';
+        if (f.type === 'number') {
+          // f.blank: puste pole zostaje puste (np. metraż nieznany ≠ metraż 0).
+          const txt = String(raw ?? '').trim().replace(',', '.');
+          const n = Number(txt);
+          newRecord[f.key] = txt === '' ? (f.blank ? '' : 0) : Number.isFinite(n) ? n : f.blank ? '' : 0;
+          continue;
+        }
+        newRecord[f.key] = raw?.trim() ?? '';
       }
 
-      const missingRequired = def.fields.some((f) => f.required && f.type !== 'sublist' && !newRecord[f.key]);
+      const missingRequired = def.fields.some((f) => f.required && f.type !== 'sublist' && f.type !== 'heading' && !newRecord[f.key]);
       if (missingRequired) {
         alert('Uzupełnij wymagane pola (oznaczone *).');
         return;
       }
 
       if (editingId) {
-        await nadzorUpdate(currentEntity, { ...newRecord, id: editingId });
+        // 03.11.2026: { ...record } — zachowaj pola spoza formularza
+        // (przesunięcie na Planie rejonu, znacznik przykładu, data importu).
+        await nadzorUpdate(currentEntity, { ...record, ...newRecord, id: editingId });
       } else {
         await nadzorAdd(currentEntity, newRecord);
       }
