@@ -403,17 +403,50 @@ export async function exportAllData(label) {
   };
 }
 
-export async function importAllData(data) {
-  const summary = { dodaneNadzor: 0, dodaneWiedza: 0, pominieteWiedza: 0 };
+// entities (np. NADZOR_ENTITIES): definicje pól — potrzebne, żeby przepiąć powiązania.
+// 03.11.2026: wcześniej rekordy dostawały nowe id, a pola "zasilany z", "miejsce zabudowy",
+// "chodnik", listy silników itd. dalej wskazywały stare id — powiązania znikały albo
+// wskazywały na cudze rekordy. Teraz dwa przejścia: dodanie z mapą stare id -> nowe id,
+// potem podmiana odwołań (fk-or-free: liczba = id, tekst zostaje; fk-multi: lista id).
+export async function importAllData(data, entities = null) {
+  const summary = { dodaneNadzor: 0, dodaneWiedza: 0, pominieteWiedza: 0, przepietePowiazania: 0, bezCelu: 0 };
 
   if (data.nadzor) {
+    const mapa = {}; // store -> Map(stareId -> noweId)
+    const dodane = []; // [store, noweId, rekord]
     for (const storeName of NADZOR_STORES) {
       const records = data.nadzor[storeName];
       if (!Array.isArray(records)) continue;
+      mapa[storeName] = new Map();
       for (const record of records) {
         const { id, ...rest } = record; // odrzucamy obce id, lokalna baza nada własne
-        await nadzorAdd(storeName, rest);
+        const noweId = await nadzorAdd(storeName, rest);
+        if (id !== undefined) mapa[storeName].set(id, noweId);
+        dodane.push([storeName, noweId, rest]);
         summary.dodaneNadzor += 1;
+      }
+    }
+    if (entities) {
+      for (const [storeName, noweId, rest] of dodane) {
+        const pola = (entities[storeName]?.fields || []).filter((f) => f.refStore && (f.type === 'fk-or-free' || f.type === 'fk-multi'));
+        if (!pola.length) continue;
+        const nowy = { ...rest, id: noweId };
+        let zmiana = false;
+        for (const f of pola) {
+          const m = mapa[f.refStore];
+          const v = nowy[f.key];
+          if (f.type === 'fk-or-free' && typeof v === 'number') {
+            if (m && m.has(v)) { nowy[f.key] = m.get(v); summary.przepietePowiazania += 1; }
+            else { nowy[f.key] = ''; summary.bezCelu += 1; } // wskazywał rekord spoza pliku
+            zmiana = true;
+          } else if (f.type === 'fk-multi' && Array.isArray(v)) {
+            nowy[f.key] = v.filter((x) => m && m.has(x)).map((x) => m.get(x));
+            summary.przepietePowiazania += nowy[f.key].length;
+            summary.bezCelu += v.length - nowy[f.key].length;
+            zmiana = true;
+          }
+        }
+        if (zmiana) await nadzorUpdate(storeName, nowy);
       }
     }
   }

@@ -205,6 +205,22 @@ try {
   ok(imp.nrKop({ t_nr: 'MAR-123' }) === '123' && imp.nrKop({ t_nr: 'IT3Sb-456/1' }) === '456' && imp.nrKop({ t_nr: 'STGCA nr 78' }) === '78' && imp.nrKop({ t_nr: 'STARY-T9' }) === '', 'nr kopalniany z nazw: MAR-123, IT3Sb-456/1, STGCA nr 78');
   await plan.init({});
   ok(!svg.innerHTML.includes('NaN'), 'plan po imporcie schematu bez NaN');
+  // 7) Synchronizacja: eksport -> import przepina powiązania na nowe id (03.11.2026)
+  const { NADZOR_ENTITIES } = await import('./js/nadzor-entities.js');
+  const eksp = await db.exportAllData('test');
+  const przed = (await db.nadzorGetAll('poleRozdzielcze')).length;
+  const wImp = await db.importAllData(eksp, NADZOR_ENTITIES);
+  const pola7 = await db.nadzorGetAll('poleRozdzielcze');
+  const tr7 = await db.nadzorGetAll('transformatory');
+  const kopie = (n) => pola7.filter((x) => x.p_nazwa === n).sort((x, y) => x.id - y.id);
+  const [r20a, r20b] = kopie('R-20 pole 1');
+  const [r10a, r10b] = kopie('R-10 pole 1');
+  const t901 = tr7.filter((x) => x.t_nr_kop === '901').sort((x, y) => x.id - y.id);
+  const t902 = tr7.filter((x) => x.t_nr_kop === '902').sort((x, y) => x.id - y.id);
+  const r10p2 = kopie('R-10 pole 2');
+  ok(pola7.length === 2 * przed && r20b && r20a.zasilane_z_pola === r10a.id && r20b.zasilane_z_pola === r10b.id, 'import kopii: przelot w kopii wskazuje kopię pola, oryginał bez zmian');
+  ok(t902[1].zasilany_z_transformatora === t901[1].id && t901[1].zasilany_z_pola === r10p2[1].id && r10p2[1].miejsce_zabudowy !== r10p2[0].miejsce_zabudowy, 'import kopii: łańcuch trafo i miejsce zabudowy pola przepięte na kopie');
+  ok(wImp.przepietePowiazania > 0 && kopie('R-10 pole 4')[1].zasilane_z_pola === 'R-9 p.3', `import kopii: ${wImp.przepietePowiazania} powiązań przepiętych, wpis tekstowy spoza bazy bez zmian`);
   window.__gotowe = true;
 } catch (e) {
   log.push('WYJĄTEK ' + (e && e.stack || e));

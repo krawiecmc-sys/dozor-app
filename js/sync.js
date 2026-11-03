@@ -123,11 +123,13 @@ export function initSync({ onImported, onExported } = {}) {
         return;
       }
 
-      const summary = await importAllData(data);
+      const summary = await importAllData(data, NADZOR_ENTITIES);
       statusEl.textContent =
         `Zaimportowano: ${summary.dodaneNadzor} rekordów Nadzoru/Przeglądu/Diagnostyki, ` +
         `${summary.dodaneWiedza} nowych rekordów Bazy wiedzy ` +
-        `(pominięto ${summary.pominieteWiedza} już istniejących).`;
+        `(pominięto ${summary.pominieteWiedza} już istniejących). ` +
+        `Powiązania przepięte: ${summary.przepietePowiazania}` +
+        (summary.bezCelu ? `, bez celu w pliku (wyczyszczone): ${summary.bezCelu}` : '') + '.';
 
       if (onImported) await onImported();
     } catch (err) {
