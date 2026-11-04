@@ -12,6 +12,7 @@
 
 body {
   margin: 0;
+  overflow-x: clip; /* 04.11.2026: nic nie moze rozpychac strony w bok (clip, nie hidden - zostaje sticky naglowek) */
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   background: var(--grey);
   color: var(--navy);
@@ -515,6 +516,17 @@ body {
 
 .section-switch-secondary {
   background: var(--grey-dark);
+  /* 04.11.2026: 6 podzakladek nie miesci sie na telefonie - pasek przewija sie sam, strona nie */
+  position: relative;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.section-switch-secondary::-webkit-scrollbar { display: none; }
+.section-switch-secondary .section-btn {
+  flex: 1 0 auto;
+  white-space: nowrap;
+  padding: 0.75rem 0.9rem;
 }
 
 #nadzor-crud-area,

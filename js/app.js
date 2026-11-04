@@ -357,6 +357,12 @@ async function pokazWMapie(entityKey, id) {
 function switchNadzorSub(subName) {
   nadzorSubSwitchEl.querySelectorAll('.section-btn').forEach((b) => {
     b.classList.toggle('active', b.dataset.sub === subName);
+    // aktywna zakladka widoczna w przewijanym pasku (przewija pasek, nie strone)
+    if (b.dataset.sub === subName) {
+      const nav = nadzorSubSwitchEl, l = b.offsetLeft, r = l + b.offsetWidth;
+      if (l < nav.scrollLeft) nav.scrollLeft = l;
+      else if (r > nav.scrollLeft + nav.clientWidth) nav.scrollLeft = r - nav.clientWidth;
+    }
   });
 
   nadzorActiveSub = subName;
