@@ -27,13 +27,14 @@ export const ZASILANIE = {
     ['zasilany_z_urzadzenia', 'urzadzenia', 'nazwa', 'kabel'],
   ],
   przenosniki: [['zasilany_z_urzadzenia', 'urzadzenia', 'nazwa', 'kabel']],
+  maszyny: [['zasilany_z_urzadzenia', 'urzadzenia', 'nazwa', 'kabel']],
 };
 
-export const TYTUL = { rozdzielnie: 'nazwa_r', poleRozdzielcze: 'p_nazwa', transformatory: 't_nr', urzadzenia: 'nazwa', kb: 'kb_nazwa', przenosniki: 'pr_nr', silniki: 'nazwa_silnika', chodniki: 'ch_nazwa' };
+export const TYTUL = { rozdzielnie: 'nazwa_r', poleRozdzielcze: 'p_nazwa', transformatory: 't_nr', urzadzenia: 'nazwa', kb: 'kb_nazwa', maszyny: 'm_nazwa', przenosniki: 'pr_nr', silniki: 'nazwa_silnika', chodniki: 'ch_nazwa' };
 
 export const jestOdbiornik = (rec) => String(rec?.u_rodzaj || '').startsWith('odbiornik');
 // urządzenia końcowe układu: nie mają przelotów i nic nie zasilają
-export const KONCOWE = new Set(['odbiornik', 'kb', 'przenosniki']);
+export const KONCOWE = new Set(['odbiornik', 'kb', 'maszyny', 'przenosniki']);
 export const rodzajRek = (store, rec) => (store === 'urzadzenia' ? (jestOdbiornik(rec) ? 'odbiornik' : 'wylacznik') : store);
 export const klucz = (store, rec) => `${store}:${rec.id}`;
 
@@ -90,7 +91,7 @@ export function rodzajPolaczenia(p) {
 const przelotSieci = (p) => rodzajPolaczenia(p) === 'przelot' && (p.zrodlo.store === 'poleRozdzielcze' || p.zrodlo.store === 'transformatory');
 
 // ---------- rejon (KB) ----------
-export const MAGAZYNY_REJONU = ['poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb', 'przenosniki'];
+export const MAGAZYNY_REJONU = ['poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb', 'maszyny', 'przenosniki'];
 
 // Rejon wpisany wprost: pole "rejon" (KB z listy albo nazwa rejonu bez kombajnu); kombajn sam wyznacza rejon;
 // transformator z importu ma "Rejon / grupa" — liczy się, gdy to nazwa kombajnu.

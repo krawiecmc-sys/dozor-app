@@ -1,5 +1,5 @@
 const DB_NAME = 'dozor-baza-wiedzy';
-const DB_VERSION = 10; // 10: chodniki + przenosniki (Plan rejonu, 03.11.2026)
+const DB_VERSION = 11; // 10: chodniki + przenosniki (Plan rejonu, 03.11.2026); 11: maszyny (05.11.2026)
 const STORE = 'wiedza';
 const STORE_META = 'meta';
 const SEED_VERSION_KEY = 'seedVersion';
@@ -30,6 +30,7 @@ export const NADZOR_STORES = [
   'transformatory',
   'urzadzenia',
   'kb',
+  'maszyny',
   'czujniki',
   'silniki',
   'chodniki',

@@ -317,6 +317,29 @@ export const NADZOR_ENTITIES = {
   // 03.11.2026: chodniki wracają (usunięte 31.08.2026 jako "chodnikiTrasy")
   // w prostszej postaci — tylko geometria do Planu rejonu: skąd wychodzi,
   // w którą stronę i jak długi. Trasa kabla wynika z położenia obiektów.
+  // 05.11.2026 (Piotr: "osobna, powiązana"): maszyny inne niż KB — urządzenia końcowe zasilane z wyłącznika,
+  // w rejonie jak KB; silniki maszyny wybierane z tabeli Silniki (jak przy KB)
+  maszyny: {
+    label: 'Maszyny',
+    labelSingular: 'maszyna',
+    titleField: 'm_nazwa',
+    fields: [
+      { key: 'm_nazwa', label: 'Nazwa / numer maszyny', type: 'text', required: true },
+      { key: 'm_rodzaj', label: 'Rodzaj maszyny', type: 'select', options: ['wiertnica', 'ładowarka', 'kolejka podwieszana', 'kolejka spągowa', 'wciągarka', 'kruszarka', 'wentylator lutniowy', 'agregat hydrauliczny', 'inna'], required: true },
+      { key: 'm_typ', label: 'Typ / producent', type: 'text' },
+      { key: 'oddzial', label: 'Oddział elektryczny (użytkownik)', type: 'select', options: ['', 'odstawczy', 'przodkowy', 'ścianowy', 'inny'], hint: 'Na tej samej sieci są transformatory i urządzenia innych oddziałów — na Planie rejonu widać je wyblakłe albo ukryte. Puste: jak transformator, z którego zasilane.' },
+      { key: 'rejon', label: 'Rejon (KB)', type: 'fk-or-free', refStore: 'kb', refField: 'kb_nazwa', hint: 'Zwykle puste — rejon jak wyłącznik, z którego zasilana maszyna.' },
+      { key: 'moc', label: 'Moc (kW)', type: 'number', blank: true },
+      { key: 'nap_zas', label: 'Napięcie zasilania', type: 'select', options: ['', '0,5 kV', '1 kV', '6 kV'], hint: 'Z dokumentacji maszyny (DTR, tabliczka).' },
+      { key: 'zasilany_z_urzadzenia', label: 'Zasilana z (wyłącznik / aparat)', type: 'fk-or-free', refStore: 'urzadzenia', refField: 'nazwa', hint: 'Maszyna jest urządzeniem końcowym — zasilana z wyłącznika, szafy stycznikowej albo zespołu.' },
+      { key: 'silniki', label: 'Silniki', type: 'fk-multi', refStore: 'silniki', refLabelFields: ['nazwa_silnika', 's_moc', 's_rodzaj'] },
+      { key: 'nastawy_zabezpieczen', label: 'Nastawy zabezpieczeń', type: 'sublist', subFields: ZABEZPIECZENIA_SUBFIELDS },
+      ...poleLokalizacji(),
+      ...poleKabla(),
+      ZRODLO_DANYCH,
+      { key: 'uwagi', label: 'Uwagi', type: 'textarea' },
+    ],
+  },
   chodniki: {
     label: 'Chodniki',
     labelSingular: 'chodnik',
@@ -408,7 +431,7 @@ export const NADZOR_ENTITIES = {
         key: 'typObiektu',
         label: 'Typ obiektu',
         type: 'select',
-        options: ['Rozdzielnia', 'Pole rozdzielcze', 'Transformator', 'Urządzenie', 'KB', 'Silnik', 'Czujnik', 'Przenośnik', 'Chodnik'],
+        options: ['Rozdzielnia', 'Pole rozdzielcze', 'Transformator', 'Urządzenie', 'KB', 'Maszyna', 'Silnik', 'Czujnik', 'Przenośnik', 'Chodnik'],
       },
       { key: 'obiekt', label: 'Obiekt (nr / nazwa)', type: 'text', required: true },
       { key: 'wynik', label: 'Wynik', type: 'select', options: ['OK', 'Usterka', 'Do ponownego sprawdzenia'] },

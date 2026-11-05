@@ -41,7 +41,7 @@ function hasExpiredZabezpieczenie(zabezpieczenia) {
 }
 
 // Elementy, które mają miejsce na Planie rejonu (03.11.2026: przejście Mapa -> Plan)
-const NA_PLANIE = new Set(['rozdzielnie', 'poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb']);
+const NA_PLANIE = new Set(['rozdzielnie', 'poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb', 'maszyny']);
 
 function node(label, { expired = false, meta = '', entityKey = null, id = null } = {}, childrenHtml = '') {
   const clickableAttrs = entityKey ? `data-entity="${entityKey}" data-id="${id}" tabindex="0"` : '';
@@ -84,7 +84,8 @@ export async function renderDashboard(containerId, { onEditRecord, onShowOnPlan 
   const silnikiById = new Map(silniki.map((s) => [s.id, s]));
   const czujnikiById = new Map(czujniki.map((c) => [c.id, c]));
 
-  const usedIds = { poleRozdzielcze: new Set(), transformatory: new Set(), urzadzenia: new Set(), kb: new Set(), silniki: new Set(), czujniki: new Set() };
+  const maszyny = await nadzorGetAll('maszyny');
+  const usedIds = { poleRozdzielcze: new Set(), transformatory: new Set(), urzadzenia: new Set(), kb: new Set(), maszyny: new Set(), silniki: new Set(), czujniki: new Set() };
 
   function renderSilnikiCzujnikiFor(kbRecord) {
     const silnikiHtml = (Array.isArray(kbRecord.silniki) ? kbRecord.silniki : [])
@@ -129,6 +130,17 @@ export async function renderDashboard(containerId, { onEditRecord, onShowOnPlan 
       .join('');
   }
 
+  // 05.11.2026: maszyny (wiertnice, ładowarki…) — zasilane z wyłącznika, z silnikami jak KB
+  function renderMaszynyFor(parentRecord) {
+    return maszyny
+      .filter((m) => wskazujeNa(m.zasilany_z_urzadzenia, parentRecord, 'nazwa'))
+      .map((m) => {
+        usedIds.maszyny.add(m.id);
+        return node(`${m.m_rodzaj ? m.m_rodzaj + ' — ' : ''}${m.m_nazwa}`, { expired: hasExpiredZabezpieczenie(m.nastawy_zabezpieczen), entityKey: 'maszyny', id: m.id }, renderSilnikiCzujnikiFor(m));
+      })
+      .join('');
+  }
+
   // Urządzenie może być zasilane z Transformatora ALBO z innego Urządzenia
   // (self-referencja w nadzor-entities.js: zasilane_z_urzadzenia) — stąd
   // parametr parentTyp, żeby wiedzieć którym polem/kluczem dopasowywać.
@@ -168,7 +180,7 @@ export async function renderDashboard(containerId, { onEditRecord, onShowOnPlan 
             entityKey: 'urzadzenia',
             id: u.id,
           },
-          renderTransformatoryFor(u, 'urzadzenia', dalej) + renderUrzadzeniaFor('urzadzenia', u, dalej) + renderKbFor('urzadzenia', u)
+          renderTransformatoryFor(u, 'urzadzenia', dalej) + renderUrzadzeniaFor('urzadzenia', u, dalej) + renderKbFor('urzadzenia', u) + renderMaszynyFor(u)
         );
       })
       .join('');
@@ -251,7 +263,8 @@ export async function renderDashboard(containerId, { onEditRecord, onShowOnPlan 
     { label: 'Transformatory', entityKey: 'transformatory', records: transformatory.filter((r) => !usedIds.transformatory.has(r.id)), titleField: 't_nr' },
     { label: 'Urządzenia', entityKey: 'urzadzenia', records: urzadzenia.filter((r) => !usedIds.urzadzenia.has(r.id)), titleField: 'nazwa' },
     { label: 'KB', entityKey: 'kb', records: kb.filter((r) => !usedIds.kb.has(r.id)), titleField: 'kb_nazwa' },
-    { label: 'Silniki (nieprzypisane do żadnego KB)', entityKey: 'silniki', records: silniki.filter((r) => !usedIds.silniki.has(r.id)), titleField: 'nazwa_silnika' },
+    { label: 'Maszyny', entityKey: 'maszyny', records: maszyny.filter((r) => !usedIds.maszyny.has(r.id)), titleField: 'm_nazwa' },
+    { label: 'Silniki (nieprzypisane do KB ani maszyny)', entityKey: 'silniki', records: silniki.filter((r) => !usedIds.silniki.has(r.id)), titleField: 'nazwa_silnika' },
     { label: 'Czujniki (nieprzypisane do żadnego KB)', entityKey: 'czujniki', records: czujniki.filter((r) => !usedIds.czujniki.has(r.id)), titleField: 'nazwa_czujnik' },
   ].filter((g) => g.records.length > 0);
 

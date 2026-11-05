@@ -28,6 +28,7 @@ const OBIEKTY = [
   { store: 'transformatory', label: 'Transformator', title: 't_nr', symbol: 'transformator' },
   { store: 'urzadzenia', label: 'Urządzenie', title: 'nazwa', symbol: 'urzadzenie' },
   { store: 'kb', label: 'Kombajn / KB', title: 'kb_nazwa', symbol: 'kombajn' },
+  { store: 'maszyny', label: 'Maszyna', title: 'm_nazwa', symbol: 'maszyna' },
 ];
 
 // ZASILANIE, rozwiaz, jestOdbiornik, KONCOWE, rodzajRek: siec-zasilania.js (wspólne z Grafem zasilania)
@@ -46,6 +47,7 @@ const ZRODLA_RODZAJU = {
   // odbiornik: z wyłącznika; odbiornik 6 kV (pompa odwadniania) wprost z pola
   odbiornik: [['zasilane_z_urzadzenia', 'urzadzenia', 'wylacznik'], ['zasilane_z_pola', 'poleRozdzielcze', 'poleRozdzielcze']],
   kb: [['zasilany_z_urzadzenia', 'urzadzenia', 'wylacznik']],
+  maszyny: [['zasilany_z_urzadzenia', 'urzadzenia', 'wylacznik']],
   przenosniki: [['zasilany_z_urzadzenia', 'urzadzenia', 'wylacznik']],
 };
 const DOMYSLNY_ODPLYW = { poleRozdzielcze: 'transformatory', transformatory: 'wylacznik', wylacznik: 'odbiornik' };
@@ -65,6 +67,8 @@ const RODZAJE = [
     zasilanyEtykieta: 'Zasilany z wyłącznika', uwaga: 'Urządzenie końcowe (silnik, pompa, maszyna) — zasilane z wyłącznika, nie bezpośrednio z transformatora; nie ma przelotów i nic nie zasila. Napięcie jak wyłącznika, z którego jest zasilane.' },
   { id: 'kb', store: 'kb', label: 'Kombajn / KB', krotko: 'Kombajn', nazwa: 'kb_nazwa', przyklad: 'np. AM-1',
     zasilanyEtykieta: 'Zasilany z wyłącznika', uwaga: 'Kombajn zasilany z wyłącznika.' },
+  { id: 'maszyny', store: 'maszyny', label: 'Maszyna (wiertnica, ładowarka, kolejka…)', krotko: 'Maszyna', nazwa: 'm_nazwa', przyklad: 'np. wiertnica WD-1', nap: NAP_URZ,
+    zasilanyEtykieta: 'Zasilana z wyłącznika', uwaga: 'Maszyna jest urządzeniem końcowym — zasilana z wyłącznika; rodzaj i silniki dopiszesz w zakładce Maszyny.' },
   { id: 'przenosniki', store: 'przenosniki', label: 'Przenośnik / napęd', krotko: 'Przenośnik', nazwa: 'pr_nr', przyklad: 'np. 1.6',
     zasilanyEtykieta: 'Napęd zasilany z wyłącznika', uwaga: 'Napęd przenośnika zasilany z wyłącznika.' },
 ];
@@ -179,7 +183,7 @@ export function createPlanView(containerId, ustawienia = {}) {
   // ---------- dane i geometria ----------
 
   async function wczytajDane() {
-    const magazyny = ['chodniki', 'przenosniki', 'rozdzielnie', 'poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb'];
+    const magazyny = ['chodniki', 'przenosniki', 'rozdzielnie', 'poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb', 'maszyny'];
     const wyniki = await Promise.all(magazyny.map((m) => nadzorGetAll(m)));
     dane = Object.fromEntries(magazyny.map((m, i) => [m, wyniki[i]]));
     katalog = await wczytajKatalog();
@@ -293,8 +297,8 @@ export function createPlanView(containerId, ustawienia = {}) {
   // poziomie. Elementy bez zasilania stają na poziomie swojego rodzaju. Jednostki "świata" jak na planie.
   const SCH_DX = 70;
   const SCH_DY = 80;
-  const POZIOM_RODZAJU = { rozdzielnie: 0, poleRozdzielcze: 1, transformatory: 2, wylacznik: 3, odbiornik: 4, kb: 4, przenosniki: 4 };
-  const MAGAZYNY_SCHEMATU = ['rozdzielnie', 'poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb', 'przenosniki'];
+  const POZIOM_RODZAJU = { rozdzielnie: 0, poleRozdzielcze: 1, transformatory: 2, wylacznik: 3, odbiornik: 4, kb: 4, maszyny: 4, przenosniki: 4 };
+  const MAGAZYNY_SCHEMATU = ['rozdzielnie', 'poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb', 'maszyny', 'przenosniki'];
   let schCache = null;
   let schKlucz = null;
   function ukladSchematu() {
@@ -498,11 +502,12 @@ export function createPlanView(containerId, ustawienia = {}) {
     if (store === 'transformatory') return [rec.t_typ, rec.t_napiecie, kw(rec.t_moc, 'kVA')].filter(Boolean).join(' · ');
     if (store === 'urzadzenia') return [rec.nap_zas, kw(rec.moc, 'kW')].filter(Boolean).join(' · ');
     if (store === 'kb') return [rec.typ_kb, rec.nap_zas].filter(Boolean).join(' · ');
+    if (store === 'maszyny') return [rec.m_rodzaj, rec.nap_zas, num(rec.moc) ? `${rec.moc} kW` : ''].filter(Boolean).join(' · ');
     if (store === 'przenosniki') return kw(rec.pr_moc, 'kW');
     return '';
   }
 
-  const ROZMIAR_BAZOWY = { rozdzielnia: [24, 15], transformator: [11, 17], naped: [11, 11], kombajn: [20, 10], pole: [7, 7], urzadzenie: [13, 9] };
+  const ROZMIAR_BAZOWY = { rozdzielnia: [24, 15], transformator: [11, 17], naped: [11, 11], kombajn: [20, 10], maszyna: [13, 10], pole: [7, 7], urzadzenie: [13, 9] };
   const rozmiarSymbolu = (typ) => (ROZMIAR_BAZOWY[typ] || [12, 12]).map((v) => v * sk());
 
   // ---------- rysowanie ----------
@@ -1108,8 +1113,8 @@ export function createPlanView(containerId, ustawienia = {}) {
   const chodnikNapedu = (pr) => rozwiaz(pr?.pr_chodnik, dane.chodniki || [], 'ch_nazwa');
 
   // ---------- umiejscowienie przy obiekcie (05.11.2026) ----------
-  const MOZE_STAC_PRZY = new Set(['urzadzenia', 'transformatory', 'kb']);
-  const MAGAZYNY_PRZY = ['przenosniki', 'urzadzenia', 'kb', 'transformatory', 'rozdzielnie'];
+  const MOZE_STAC_PRZY = new Set(['urzadzenia', 'transformatory', 'kb', 'maszyny']);
+  const MAGAZYNY_PRZY = ['przenosniki', 'urzadzenia', 'kb', 'maszyny', 'transformatory', 'rozdzielnie'];
   function opisObiektu(store, rec) {
     if (store === 'przenosniki') {
       const ch = chodnikNapedu(rec);
@@ -1118,6 +1123,7 @@ export function createPlanView(containerId, ustawienia = {}) {
     if (store === 'rozdzielnie') return `rozdzielni ${rec.nazwa_r ?? ''}`;
     if (store === 'transformatory') return `transformatorze ${rec.t_nr ?? ''}`;
     if (store === 'kb') return `kombajnie ${rec.kb_nazwa ?? ''}`;
+    if (store === 'maszyny') return `maszynie ${rec.m_nazwa ?? ''}`;
     return `${jestOdbiornik(rec) ? 'urządzeniu' : 'wyłączniku'} ${rec.nazwa ?? ''}`;
   }
   // [{ wartosc: 'magazyn:id', opis }] — najpierw to, co element zasila, potem jego źródło, potem reszta;
@@ -1206,7 +1212,7 @@ export function createPlanView(containerId, ustawienia = {}) {
     const cel = rodzajRek(p.cel.store, p.cel.rec);
     if (zr === 'transformatory') return 'transformator nie zasila odbiorów bezpośrednio — wstaw wyłącznik';
     if (zr === 'odbiornik') return 'odbiornik nie zasila innych urządzeń';
-    if (cel === 'odbiornik' || cel === 'kb' || cel === 'przenosniki') return 'zasilanie powinno iść z wyłącznika';
+    if (cel === 'odbiornik' || cel === 'kb' || cel === 'maszyny' || cel === 'przenosniki') return 'zasilanie powinno iść z wyłącznika';
     return 'niezgodne z układem zasilania';
   }
 
@@ -1262,7 +1268,7 @@ export function createPlanView(containerId, ustawienia = {}) {
 
   // napięcia do wyboru w formularzu urządzenia przy danym źródle ('pole|magazyn|id'); null = pełna lista
   function opcjeNapieciaFormularza(rodzajId, wartoscZrodla, celRec = null) {
-    if (!['wylacznik', 'odbiornik'].includes(rodzajId) || !wartoscZrodla) return null;
+    if (!['wylacznik', 'odbiornik', 'maszyny'].includes(rodzajId) || !wartoscZrodla) return null;
     const [, zStore, id] = String(wartoscZrodla).split('|');
     const zRec = (dane[zStore] || []).find((r) => r.id === Number(id));
     const o = opcjeOd(zStore, zRec, 'urzadzenia', { ...(celRec || {}), nap_zas: '' });
@@ -1607,7 +1613,7 @@ export function createPlanView(containerId, ustawienia = {}) {
   }
 
   async function usunPrzyklad() {
-    for (const store of ['chodniki', 'przenosniki', 'rozdzielnie', 'poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb']) {
+    for (const store of ['chodniki', 'przenosniki', 'rozdzielnie', 'poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb', 'maszyny']) {
       for (const rec of await nadzorGetAll(store)) {
         if (rec._przyklad === MARKER_PRZYKLADU) await nadzorDelete(store, rec.id);
       }

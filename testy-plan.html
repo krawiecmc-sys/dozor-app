@@ -372,6 +372,19 @@ try {
   ok(!pg8[`urzadzenia:${PA}`] && pg8[`transformatory:${TA}`] && pg8[`transformatory:${TB}`] && pg8[`rozdzielnie:${RR}`], 'graf rejonu AM-8: od rozdzielni do odbiorników AM-8, bez pompy AM-9');
   G.ustawRejon('wszystkie', true);
   window.__G = G;
+  // 15) Maszyny — osobna tabela powiązana z siecią (05.11.2026)
+  const MW = await db.nadzorAdd('maszyny', { m_nazwa: 'WD-1', m_rodzaj: 'wiertnica', nap_zas: '1 kV', zasilany_z_urzadzenia: WP, lok_chodnik: chod.id, lok_metraz: 30, lok_strona: 'prawa' });
+  await plan.init({});
+  await graf.init({});
+  const polM = T.polaczenia().find((p) => p.cel.store === 'maszyny' && p.cel.rec.id === MW);
+  ok(polM && T.rodzajPolaczenia(polM) === 'odplyw', 'maszyna zasilana z wyłącznika — odpływ do urządzenia końcowego');
+  ok(T.rejony().wlasny.get(`maszyny:${MW}`) === 'AM-9', 'maszyna w rejonie z sieci (AM-9)');
+  ok(T.pozycje()[`maszyny:${MW}`] && document.querySelector(`#plan-content [data-obiekt="maszyny:${MW}"]`), 'maszyna na planie w chodniku');
+  const pgM = G.pozycje();
+  ok(pgM[`maszyny:${MW}`] && pgM[`maszyny:${MW}`].y > pgM[`urzadzenia:${WP}`].y, 'maszyna w grafie pod swoim wyłącznikiem');
+  ok(T.zrodlaDla('maszyny').every((o) => o.wartosc.includes('|urzadzenia|')), 'maszynę może zasilać tylko wyłącznik / aparat');
+  const eksM = await db.exportAllData('tM');
+  ok(Array.isArray(eksM.nadzor?.maszyny) && eksM.nadzor.maszyny.some((r) => r.m_nazwa === 'WD-1'), 'maszyny w kopii (eksport)');
   window.__niezgodne =[...document.querySelectorAll('#plan-braki details')].find((d) => d.textContent.includes('niezgodne'))?.textContent || '';
   window.__gotowe = true;
 } catch (e) {

@@ -100,6 +100,12 @@ export function symbolSvg(typ, x, y, obwodka, k = 1, nap = [null, null]) {
     return `<rect x="${x - w / 2 - f(4)}" y="${y - h / 2}" width="${w}" height="${h}" rx="${f(2)}" fill="#37474f" ${st}/>`
       + `<polygon points="${zeby.join(' ')}" fill="#ffb300" ${st}/><circle cx="${x + w / 2 + f(3)}" cy="${y}" r="${f(3)}" fill="#37474f"/>`;
   }
+  if (typ === 'maszyna') {
+    // maszyna (wiertnica, ładowarka, kolejka…): korpus na kołach
+    const w = f(24), h = f(12);
+    return `<rect x="${x - w / 2}" y="${y - h / 2 - f(2)}" width="${w}" height="${h}" rx="${f(2)}" fill="#5d4037" ${st}/>`
+      + `<circle cx="${x - f(7)}" cy="${y + h / 2}" r="${f(3.2)}" fill="#ffffff" ${st}/><circle cx="${x + f(7)}" cy="${y + h / 2}" r="${f(3.2)}" fill="#ffffff" ${st}/>`;
+  }
   if (typ === 'czujnik') {
     // czujnik / zabezpieczenie pomiarowe: romb z kropką
     const a = f(8);
