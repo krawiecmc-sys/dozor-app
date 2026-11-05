@@ -6,14 +6,14 @@ import { initDiagnostyka, refreshDiagnostyka } from './diagnostyka.js';
 import { initSync, runIntegrityCheck } from './sync.js';
 import { checkExportReminder } from './export-reminder.js';
 import { renderDashboard } from './dashboard.js';
-import { createGraphView } from './graph-view.js';
 import { createPlanView } from './plan-view.js';
 import { createImportExcel } from './import-excel.js';
 // Kreator łańcucha (chain-builder.js) usunięty 31.08.2026 (Faza 2 reorganizacji)
 // — odwoływał się do starego schematu, zastąpiony formularzami z realnymi
 // kluczami (Faza 1) i widokiem graficznym poniżej (Faza 4).
 
-const graphView = createGraphView('graf-content');
+// 05.11.2026: Graf zasilania = widok schematyczny Planu rejonu (te same dane, reguły i edycja)
+const graphView = createPlanView('graf-content', { tryb: 'schemat' });
 const planView = createPlanView('plan-content');
 
 // Kategorie "Wszystko"/"Normy techniczne"/"Schematy uniwersalne" usunięte
@@ -269,12 +269,7 @@ async function refreshActiveNadzorSub() {
       onShowOnPlan: (entityKey, id) => pokazNaPlanie(entityKey, id),
     });
   } else if (nadzorActiveSub === 'graf') {
-    await graphView.init({
-      onEditRecord: async (entityKey, id) => {
-        switchNadzorSub('crud');
-        await editNadzorRecord(entityKey, id);
-      },
-    });
+    await graphView.init(opcjeGrafu());
   } else if (nadzorActiveSub === 'plan') {
     await planView.init(opcjePlanu());
   } else if (nadzorActiveSub === 'diagnostyka') {
@@ -335,7 +330,18 @@ function opcjePlanu() {
       await editNadzorRecord(entityKey, id);
     },
     onShowInMap: (entityKey, id) => pokazWMapie(entityKey, id),
+    onPokazWInnymWidoku: (entityKey, id) => pokazWGrafie(entityKey, id),
   };
+}
+
+function opcjeGrafu() {
+  return { ...opcjePlanu(), onPokazWInnymWidoku: (entityKey, id) => pokazNaPlanie(entityKey, id) };
+}
+
+async function pokazWGrafie(entityKey, id) {
+  switchNadzorSub('graf');
+  await graphView.init(opcjeGrafu());
+  await graphView.pokaz(entityKey, id);
 }
 
 async function pokazNaPlanie(entityKey, id) {

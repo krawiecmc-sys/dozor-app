@@ -7,6 +7,7 @@
 </head>
 <body>
 <div id="nadzor-plan-area"><main id="plan-content" style="width:1100px"></main></div>
+<div id="nadzor-graf-area"><main id="graf-content" style="width:1100px"></main></div>
 <pre id="wynik">trwa…</pre>
 <script type="module">
 const log = [];
@@ -347,6 +348,27 @@ try {
   ok(T.obcyRejon('urzadzenia', urzR(PA)) && !T.obcyRejon('transformatory', T.dane().transformatory.find((r) => r.id === TA)) && !T.obcyRejon('urzadzenia', urzR(WB)), 'widok AM-8: pompa AM-9 wyblakła, trafo zasilające przelot widoczne');
   T.ustawRejon('wszystkie', true);
   ok(document.querySelector('[data-akcja-rejon]')?.textContent.includes('AM-9'), 'wybór rejonu na pasku planu');
+  // 14) Graf zasilania = schemat z tych samych danych (05.11.2026)
+  const { createPlanView: utworz } = await import('./js/plan-view.js');
+  const graf = utworz('graf-content', { tryb: 'schemat' });
+  let doPlanu = null;
+  await graf.init({ onEditRecord: () => {}, onPokazWInnymWidoku: (st, id) => { doPlanu = `${st}:${id}`; } });
+  const G = graf._test;
+  const pg = G.pozycje();
+  const kG = (st, id) => pg[`${st}:${id}`];
+  ok(G.tryb === 'schemat' && kG('rozdzielnie', RR) && kG('poleRozdzielcze', PR) && kG('transformatory', TA) && kG('urzadzenia', PA), 'graf rysuje się sam z danych: rozdzielnia, pole, trafo, pompa');
+  ok(kG('rozdzielnie', RR).y < kG('poleRozdzielcze', PR).y && kG('poleRozdzielcze', PR).y < kG('transformatory', TA).y && kG('transformatory', TA).y < kG('urzadzenia', WA).y, 'poziomy: rozdzielnia → pole → trafo → wyłącznik');
+  ok(Math.abs(kG('transformatory', TA).y - kG('transformatory', TB).y) < 1 && kG('transformatory', TB).x > kG('transformatory', TA).x, 'przelot 6 kV trafo → trafo na tym samym poziomie, obok');
+  const kbAM9 = T.dane().kb.find((r) => r.kb_nazwa === 'AM-9');
+  ok(kG('kb', kbAM9.id) && kG('kb', kbAM9.id).y > kG('urzadzenia', WA).y, 'KB pod swoim wyłącznikiem');
+  const svgG = document.querySelector('#graf-content svg');
+  ok(svgG.querySelectorAll('[data-kabel]').length >= 8 && !svgG.innerHTML.includes('NaN') && svgG.innerHTML.includes('stroke-dasharray="6 3.5"'), 'kable w grafie z regułami planu (odpływ przerywany), bez NaN');
+  ok(G.polaczenia().length === T.polaczenia().length, `graf i plan mają te same połączenia (${G.polaczenia().length})`);
+  G.ustawRejon('AM-8', false);
+  const pg8 = G.pozycje();
+  ok(!pg8[`urzadzenia:${PA}`] && pg8[`transformatory:${TA}`] && pg8[`transformatory:${TB}`] && pg8[`rozdzielnie:${RR}`], 'graf rejonu AM-8: od rozdzielni do odbiorników AM-8, bez pompy AM-9');
+  G.ustawRejon('wszystkie', true);
+  window.__G = G;
   window.__niezgodne =[...document.querySelectorAll('#plan-braki details')].find((d) => d.textContent.includes('niezgodne'))?.textContent || '';
   window.__gotowe = true;
 } catch (e) {

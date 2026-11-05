@@ -84,8 +84,13 @@ function esc(str) {
 const num = (v) => (v === '' || v === null || v === undefined || Number.isNaN(Number(v)) ? null : Number(v));
 
 
-export function createPlanView(containerId) {
+// tryb 'teren' — Plan rejonu (chodniki, metraże); tryb 'schemat' — Graf zasilania: drzewo od rozdzielni do odbiorników
+// końcowych, z tych samych danych i tą samą edycją (05.11.2026, Piotr: graf tożsamy z planem, w pełni edytowalny).
+export function createPlanView(containerId, ustawienia = {}) {
+  const tryb = ustawienia.tryb === 'schemat' ? 'schemat' : 'teren';
+  const SCHEMAT = tryb === 'schemat';
   const container = document.getElementById(containerId);
+  let onPokazWInnymWidoku = null;
   let onEditRecord = null;
   let onShowInMap = null;
   let dane = {};
@@ -282,7 +287,68 @@ export function createPlanView(containerId) {
     return wynik;
   }
 
+  // ---------- układ schematu (Graf zasilania) ----------
+  // Drzewo: rozdzielnia → pola → transformatory → wyłączniki → odbiorniki końcowe / KB / napędy. Rodzic = źródło
+  // zasilania (pole: rozdzielnia, w której jest). Przelot (to samo piętro, np. trafo → trafo) stoi obok, na tym samym
+  // poziomie. Elementy bez zasilania stają na poziomie swojego rodzaju. Jednostki "świata" jak na planie.
+  const SCH_DX = 70;
+  const SCH_DY = 80;
+  const POZIOM_RODZAJU = { rozdzielnie: 0, poleRozdzielcze: 1, transformatory: 2, wylacznik: 3, odbiornik: 4, kb: 4, przenosniki: 4 };
+  const MAGAZYNY_SCHEMATU = ['rozdzielnie', 'poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb', 'przenosniki'];
+  let schCache = null;
+  let schKlucz = null;
+  function ukladSchematu() {
+    const kluczStanu = `${mojRejon}|${mojOddzial}|${warstwy.inneOddzialy}`;
+    if (schCache && schKlucz === kluczStanu && schCache.dane === dane) return schCache.uklad;
+    const wezly = new Map();
+    for (const st of MAGAZYNY_SCHEMATU) for (const rec of dane[st] || []) if (!ukryty(st, rec)) wezly.set(`${st}:${rec.id}`, { st, rec, dzieci: [], przeloty: [] });
+    const rodzic = (w) => {
+      if (w.st === 'rozdzielnie') return null;
+      if (w.st === 'poleRozdzielcze') {
+        const r = rozwiaz(w.rec.miejsce_zabudowy, dane.rozdzielnie || [], 'nazwa_r');
+        return r && wezly.get(`rozdzielnie:${r.id}`) ? { k: `rozdzielnie:${r.id}`, przelot: false } : null;
+      }
+      const z = zrodloRek(w.st, w.rec);
+      if (!z || !wezly.has(`${z.store}:${z.rec.id}`)) return null;
+      return { k: `${z.store}:${z.rec.id}`, przelot: rodzajPolaczenia({ zrodlo: z, cel: { store: w.st, rec: w.rec } }) === 'przelot' && z.store !== 'urzadzenia' };
+    };
+    const korzenie = [];
+    for (const [k, w] of wezly) {
+      const r = rodzic(w);
+      if (r) (r.przelot ? wezly.get(r.k).przeloty : wezly.get(r.k).dzieci).push(k);
+      else korzenie.push(k);
+    }
+    const poziomRodz = (k) => POZIOM_RODZAJU[rodzajRek(wezly.get(k).st, wezly.get(k).rec)] ?? 3;
+    korzenie.sort((a, b) => poziomRodz(a) - poziomRodz(b));
+    const uklad = new Map();
+    let kolumna = 0;
+    const odwiedzone = new Set();
+    const umiesc = (k, poziom) => {
+      if (odwiedzone.has(k)) return null;
+      odwiedzone.add(k);
+      const w = wezly.get(k);
+      const xs = w.dzieci.map((d) => umiesc(d, poziom + 1)).filter((x) => x !== null);
+      const x = xs.length ? (Math.min(...xs) + Math.max(...xs)) / 2 : kolumna++ * SCH_DX;
+      uklad.set(k, { x, y: poziom * SCH_DY });
+      for (const pk of w.przeloty) umiesc(pk, poziom);
+      return x;
+    };
+    for (const k of korzenie) {
+      if (odwiedzone.has(k)) continue;
+      umiesc(k, poziomRodz(k));
+      kolumna += 1; // odstęp między gałęziami
+    }
+    schCache = { dane, uklad };
+    schKlucz = kluczStanu;
+    return uklad;
+  }
+
   function obszarSwiata() {
+    if (SCHEMAT) {
+      const u = [...ukladSchematu().values()];
+      if (!u.length) return { minX: 0, minY: 0, maxX: 300, maxY: 200 };
+      return { minX: Math.min(...u.map((q) => q.x)), minY: Math.min(...u.map((q) => q.y)), maxX: Math.max(...u.map((q) => q.x)) + 60, maxY: Math.max(...u.map((q) => q.y)) };
+    }
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     const zdalnych = Math.min(4, rozdzielnieZdalne(null).length);
     for (let i = 0; i < zdalnych; i += 1) {
@@ -471,7 +537,7 @@ export function createPlanView(containerId) {
 
     const pasChodnika = Math.max(6, Math.round(13 * sk()));
     // chodniki
-    for (const [id, g] of geo) {
+    for (const [id, g] of SCHEMAT ? [] : geo) {
       if (ukryty('chodniki', g.rec)) continue;
       const a = naEkran({ x: g.x0, y: g.y0 }, v);
       const b = naEkran({ x: g.x0 + g.dx * g.len, y: g.y0 + g.dy * g.len }, v);
@@ -480,14 +546,33 @@ export function createPlanView(containerId) {
       if (g.rec.ch_w_drazeniu === 'tak') {
         const k = 26 * sk();
         const c = { x: b.x + g.dx * 6, y: b.y + g.dy * 6 };
-        czesci.chodniki.push(`<line x1="${c.x - g.dx * k}" y1="${c.y - g.dy * k}" x2="${c.x + g.dx * 14 * sk()}" y2="${c.y + g.dy * 14 * sk()}" stroke="${KOLOR.drazenie}" stroke-width="${Math.max(1.5, 3 * sk())}" marker-end="url(#plan-strzalka)"/>`);
+        czesci.chodniki.push(`<line x1="${c.x - g.dx * k}" y1="${c.y - g.dy * k}" x2="${c.x + g.dx * 14 * sk()}" y2="${c.y + g.dy * 14 * sk()}" stroke="${KOLOR.drazenie}" stroke-width="${Math.max(1.5, 3 * sk())}" marker-end="url(#plan-strzalka-${tryb})"/>`);
       }
       if (obcyRejon('chodniki', g.rec)) czesci.chodniki.push('</g>');
     }
 
+    if (SCHEMAT) {
+      for (const [k, q] of ukladSchematu()) {
+        const [st, idS] = k.split(':');
+        const rec = (dane[st] || []).find((r) => r.id === Number(idS));
+        if (!rec) continue;
+        const p = naEkran(q, v);
+        const def = st === 'poleRozdzielcze' ? { store: st, symbol: 'pole', label: 'Pole rozdzielcze', title: 'p_nazwa' }
+          : st === 'przenosniki' ? { store: st, symbol: 'naped', label: 'Przenośnik / napęd', title: 'pr_nr' }
+            : OBIEKTY.find((o) => o.store === st);
+        poz[k] = { x: p.x, y: p.y, lok: null, rec, obcy: obcyEl(st, rec), def: st === 'urzadzenia' && jestOdbiornik(rec) ? { ...def, symbol: 'naped' } : def };
+      }
+      // szyna rozdzielni: pole połączone ze swoją rozdzielnią
+      for (const pole of dane.poleRozdzielcze || []) {
+        const r = rozwiaz(pole.miejsce_zabudowy, dane.rozdzielnie || [], 'nazwa_r');
+        const a = r && poz[`rozdzielnie:${r.id}`];
+        const b = poz[`poleRozdzielcze:${pole.id}`];
+        if (a && b) czesci.chodniki.push(`<polyline points="${a.x},${a.y} ${a.x},${(a.y + b.y) / 2} ${b.x},${(a.y + b.y) / 2} ${b.x},${b.y}" fill="none" stroke="${KOLOR.sn}" stroke-width="${(3 + sk()).toFixed(1)}"${a.obcy || b.obcy ? ' opacity="0.35"' : ''}/>`);
+      }
+    }
     // obiekty z położeniem (kolejność: rozdzielnie, transformatory, urządzenia, KB)
     const stos = {};
-    for (const def of OBIEKTY) {
+    for (const def of SCHEMAT ? [] : OBIEKTY) {
       for (const rec of dane[def.store] || []) {
         if (ukryty(def.store, rec)) continue;
         const lok = lokalizacja(def.store, rec);
@@ -515,7 +600,7 @@ export function createPlanView(containerId) {
     }
     // 05.11.2026: rozdzielnia poza rejonem (może być daleko od początku schematu) — rysowana przed początkiem
     // pierwszego chodnika, gdy jej pole zasila coś, co jest na planie; kabel idzie od niej do chodnika i dalej
-    const zdalne = rozdzielnieZdalne(poz);
+    const zdalne = SCHEMAT ? [] : rozdzielnieZdalne(poz);
     zdalne.forEach((r, i) => {
       const pk = punktZdalny(i);
       if (!pk) return;
@@ -524,7 +609,7 @@ export function createPlanView(containerId) {
     });
     // pola rozdzielcze — rząd kwadracików przy swojej rozdzielni
     const polaRozdz = {};
-    for (const pole of dane.poleRozdzielcze || []) {
+    for (const pole of SCHEMAT ? [] : dane.poleRozdzielcze || []) {
       const r = rozwiaz(pole.miejsce_zabudowy, dane.rozdzielnie, 'nazwa_r');
       const pr = r && poz[`rozdzielnie:${r.id}`];
       if (!pr || ukryty('poleRozdzielcze', pole)) continue;
@@ -533,7 +618,7 @@ export function createPlanView(containerId) {
       poz[`poleRozdzielcze:${pole.id}`] = { x: pr.x - 18 * sk() + i * 16 * sk(), y: pr.y + 28 * sk(), lok: pr.lok, rec: pole, obcy: obcyRejon('poleRozdzielcze', pole), def: { store: 'poleRozdzielcze', symbol: 'pole', label: 'Pole rozdzielcze', title: 'p_nazwa' } };
     }
     // napędy przenośników
-    for (const pr of dane.przenosniki || []) {
+    for (const pr of SCHEMAT ? [] : dane.przenosniki || []) {
       if (ukryty('przenosniki', pr)) continue;
       const lok = lokalizacja('przenosniki', pr);
       if (!lok || !geo.has(lok.ch)) continue;
@@ -548,7 +633,7 @@ export function createPlanView(containerId) {
     }
 
     // przenośniki — linia na osi chodnika
-    for (const pr of dane.przenosniki || []) {
+    for (const pr of SCHEMAT ? [] : dane.przenosniki || []) {
       const ch = rozwiaz(pr.pr_chodnik, dane.chodniki, 'ch_nazwa');
       if (!ch || !geo.has(ch.id)) continue;
       const g = geo.get(ch.id);
@@ -578,7 +663,13 @@ export function createPlanView(containerId) {
       const odsun = -(pasChodnika / 2 + 3 + 3.5 * (pas % 7));
       pas += 1;
       let punkty = [{ x: a.x, y: a.y }];
-      const t = a.lok && b.lok ? trasa(a.lok, b.lok) : null;
+      if (SCHEMAT) {
+        if (Math.abs(a.y - b.y) > 1) {
+          const sy = a.y + (b.y - a.y) * 0.55 + (pas % 3) * 2;
+          punkty.push({ x: a.x, y: sy }, { x: b.x, y: sy });
+        }
+      }
+      const t = !SCHEMAT && a.lok && b.lok ? trasa(a.lok, b.lok) : null;
       if (t) {
         for (const q of t) {
           const g = geo.get(q.ch);
@@ -614,7 +705,7 @@ export function createPlanView(containerId) {
       if (def.store !== 'przenosniki' && !warstwy.obiekty) continue;
       const obw = warstwy.zrodlo ? KOLOR.zrodlo[rec.zrodlo_danych || ''] || KOLOR.zrodlo[''] : KOLOR.obrys;
       czesci.obiekty.push(`<g data-obiekt="${esc(klucz)}" class="plan-klik"${p.obcy ? ' opacity="0.35"' : ''}>${symbol(def.symbol, p.x, p.y, obw, sk(), napiecieObiektu(def.store, rec))}</g>`);
-      if (def.store === 'poleRozdzielcze') continue;
+      if (def.store === 'poleRozdzielcze' && !SCHEMAT) continue;
       const [rx, ry] = rozmiarSymbolu(def.symbol);
       let tytul = def.store === 'przenosniki' ? [rec.pr_typ, rec.pr_nr].filter(Boolean).join(' ') : rec[def.title];
       if (p.zdalna) tytul = `${tytul || ''} (poza rejonem)`;
@@ -626,7 +717,7 @@ export function createPlanView(containerId) {
     for (const args of opisyKabli) opis(...args);
 
     // nazwy chodników
-    if (warstwy.chodniki) {
+    if (warstwy.chodniki && !SCHEMAT) {
       for (const g of geo.values()) {
         if (ukryty('chodniki', g.rec)) continue;
         const srodek = naEkran({ x: g.x0 + (g.dx * g.len) / 2, y: g.y0 + (g.dy * g.len) / 2 }, v);
@@ -636,7 +727,7 @@ export function createPlanView(containerId) {
 
     const svg = `
       <defs>
-        <marker id="plan-strzalka" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="${KOLOR.drazenie}"/></marker>
+        <marker id="plan-strzalka-${tryb}" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="${KOLOR.drazenie}"/></marker>
       </defs>
       <rect x="0" y="0" width="${szer}" height="${wys}" fill="#ffffff" data-tlo="1"/>
       ${czesci.chodniki.join('')}
@@ -656,9 +747,18 @@ export function createPlanView(containerId) {
     sel.innerHTML = ['wszystkie', ...lista].map((o) => `<option ${o === mojRejon ? 'selected' : ''}>${esc(o)}</option>`).join('');
   }
 
+  const skalaPowiekszenia = () => (widok.sFit ? Math.max(0.05, Math.min(40, widok.s / widok.sFit)) : 1);
+
   function render() {
     odswiezWyborRejonu();
-    if (!(dane.chodniki || []).length) {
+    if (SCHEMAT && !ukladSchematu().size) {
+      svgEl.innerHTML = '';
+      wrapEl.classList.add('hidden');
+      legendaEl.innerHTML = '';
+      brakiEl.innerHTML = `<div class="plan-pusty"><p><b>Graf zasilania jest pusty.</b> Rysuje się sam z danych: rozdzielnie, pola, transformatory, wyłączniki, odbiorniki, KB i napędy z polami „zasilany z”. Dodaj pierwszy element przyciskiem „+ Dodaj element” albo zaimportuj dane w Synchronizacji.</p></div>`;
+      return;
+    }
+    if (!SCHEMAT && !(dane.chodniki || []).length) {
       svgEl.innerHTML = '';
       svgEl.setAttribute('width', 0);
       svgEl.setAttribute('height', 0);
@@ -689,12 +789,15 @@ export function createPlanView(containerId) {
       widok.dopasowany = true;
     }
     const wys = widok.wys || maksWys;
-    const w = rysuj(widok, { szer, wys });
-    pozycje = w.poz;
+    // 05.11.2026 (Piotr): powiększenie skaluje proporcjonalnie długości i wielkość elementów (symbole, linie, napisy):
+    // rysunek powstaje w skali dopasowania, a przybliżenie to jedno skalowanie całości (k)
+    const k = skalaPowiekszenia();
+    const w = rysuj({ s: widok.s / k, tx: widok.tx / k, ty: widok.ty / k }, { szer: szer / k, wys: wys / k });
+    pozycje = Object.fromEntries(Object.entries(w.poz).map(([kl, q]) => [kl, { ...q, x: q.x * k, y: q.y * k }]));
     svgEl.setAttribute('width', szer);
     svgEl.setAttribute('height', wys);
     svgEl.setAttribute('viewBox', `0 0 ${szer} ${wys}`);
-    svgEl.innerHTML = w.svg;
+    svgEl.innerHTML = k === 1 ? w.svg : `<g transform="scale(${k.toFixed(4)})">${w.svg}</g>`;
     const zoomEl = container.querySelector('#plan-zoom');
     if (zoomEl && widok.sFit) zoomEl.textContent = `${Math.round((widok.s / widok.sFit) * 100)}%`;
     renderBaner();
@@ -725,8 +828,8 @@ export function createPlanView(containerId) {
       ${kabel(KOLOR.nn05, 'Zasilanie 0,5 kV', '', 1.5)}
       ${kabel(KOLOR.nn1, 'Odpływ do urządzenia końcowego', ' stroke-dasharray="6 3.5"', 1.3)}
       ${kabel(KOLOR.obrys, 'Kabel rezerwowy', ' stroke-dasharray="10 3 2 3"')}
-      <span class="plan-leg"><svg width="34" height="10"><line x1="0" y1="5" x2="34" y2="5" stroke="${KOLOR.przenosnik}" stroke-width="4"/><line x1="0" y1="5" x2="34" y2="5" stroke="#fff" stroke-width="1.8" stroke-dasharray="1.5 6"/></svg>Przenośnik</span>
-      <span class="plan-leg"><svg width="34" height="10"><line x1="0" y1="5" x2="26" y2="5" stroke="${KOLOR.drazenie}" stroke-width="2.5"/><path d="M24,1 L33,5 L24,9 z" fill="${KOLOR.drazenie}"/></svg>Kierunek drążenia</span>
+      ${SCHEMAT ? '' : `<span class="plan-leg"><svg width="34" height="10"><line x1="0" y1="5" x2="34" y2="5" stroke="${KOLOR.przenosnik}" stroke-width="4"/><line x1="0" y1="5" x2="34" y2="5" stroke="#fff" stroke-width="1.8" stroke-dasharray="1.5 6"/></svg>Przenośnik</span>
+      <span class="plan-leg"><svg width="34" height="10"><line x1="0" y1="5" x2="26" y2="5" stroke="${KOLOR.drazenie}" stroke-width="2.5"/><path d="M24,1 L33,5 L24,9 z" fill="${KOLOR.drazenie}"/></svg>Kierunek drążenia</span>`}
       ${warstwy.zrodlo ? `<span class="plan-leg">Obrys: <b style="color:${KOLOR.zrodlo.Excel}">Excel</b> · <b style="color:${KOLOR.zrodlo['ręcznie']}">ręcznie</b> · <b style="color:${KOLOR.zrodlo.pomiar}">pomiar</b> · <b style="color:${KOLOR.zrodlo['']}">nie podano</b></span>` : ''}
     `;
   }
@@ -757,7 +860,7 @@ export function createPlanView(containerId) {
     const bezPolozenia = [];
     for (const def of OBIEKTY) {
       for (const rec of dane[def.store] || []) {
-        if (!w.poz[`${def.store}:${rec.id}`] && !ukryty(def.store, rec)) bezPolozenia.push({ def, rec });
+        if (!SCHEMAT && !w.poz[`${def.store}:${rec.id}`] && !ukryty(def.store, rec)) bezPolozenia.push({ def, rec });
       }
     }
     const przenBez = (dane.przenosniki || []).filter((r) => !w.poz[`przenosniki:${r.id}`]);
@@ -839,9 +942,10 @@ export function createPlanView(containerId) {
         ${store !== 'rozdzielnie' ? `<button type="button" class="btn-small" data-zasilanie="${store}:${id}">Zasilanie…</button>` : ''}
         ${DOMYSLNY_ODPLYW[rodzajRek(store, rec)] ? `<button type="button" class="btn-small" data-odplyw="${store}:${id}">+ Odpływ stąd</button>` : ''}
         ${store === 'rozdzielnie' ? `<button type="button" class="btn-small" data-dodaj-pole="${id}">+ Pole</button>` : ''}
-        ${store !== 'poleRozdzielcze' && store !== 'przenosniki' ? `<button type="button" class="btn-small" data-postaw="${store}:${id}">Przestaw</button>` : ''}
-        ${MOZE_STAC_PRZY.has(store) ? `<button type="button" class="btn-small" data-umiejscowienie="${store}:${id}">Umiejscowienie…</button>` : ''}
-        ${num(rec.plan_dx) || num(rec.plan_dy) ? `<button type="button" class="btn-small" data-reset="${store}:${id}">Cofnij przesunięcie</button>` : ''}
+        ${!SCHEMAT && store !== 'poleRozdzielcze' && store !== 'przenosniki' ? `<button type="button" class="btn-small" data-postaw="${store}:${id}">Przestaw</button>` : ''}
+        ${!SCHEMAT && MOZE_STAC_PRZY.has(store) ? `<button type="button" class="btn-small" data-umiejscowienie="${store}:${id}">Umiejscowienie…</button>` : ''}
+        ${!SCHEMAT && (num(rec.plan_dx) || num(rec.plan_dy)) ? `<button type="button" class="btn-small" data-reset="${store}:${id}">Cofnij przesunięcie</button>` : ''}
+        ${onPokazWInnymWidoku ? `<button type="button" class="btn-small" data-inny-widok="${store}:${id}">${SCHEMAT ? 'Na planie' : 'W grafie'}</button>` : ''}
         ${onShowInMap ? `<button type="button" class="btn-small" data-mapa="${store}:${id}">W Mapie</button>` : ''}
         <button type="button" class="btn-small btn-danger" data-usun="${store}:${id}">Usuń</button>
         <button type="button" class="btn-small" data-akcja="zamknij-karte">Zamknij</button>
@@ -1064,7 +1168,7 @@ export function createPlanView(containerId) {
     zamknijDodawanie();
     await wczytajDane();
     render();
-    if (!przy && !lokalizacja(store, { ...rec, lok_przy: '' })) zacznijStawianie(store, Number(id));
+    if (!SCHEMAT && !przy && !lokalizacja(store, { ...rec, lok_przy: '' })) zacznijStawianie(store, Number(id));
   }
 
   // ---------- edycja układu: dodawanie, zasilanie, odpływ, usuwanie ----------
@@ -1330,7 +1434,7 @@ export function createPlanView(containerId) {
     zamknijDodawanie();
     await wczytajDane();
     render();
-    if (store !== 'poleRozdzielcze' && !przy) zacznijStawianie(store, noweId);
+    if (!SCHEMAT && store !== 'poleRozdzielcze' && !przy) zacznijStawianie(store, noweId);
   }
 
   // zmiana zasilania (i rodzaju urządzenia) istniejącego elementu
@@ -1633,6 +1737,11 @@ export function createPlanView(containerId) {
       const rec = (dane[store] || []).find((r) => r.id === Number(id));
       if (rec) pokazDodawanie(DOMYSLNY_ODPLYW[rodzajRek(store, rec)], { zrodlo: { store, id: Number(id) } });
     }
+    if (t.dataset.innyWidok && onPokazWInnymWidoku) {
+      const [store, id] = t.dataset.innyWidok.split(':');
+      zamknijKarte();
+      onPokazWInnymWidoku(store, Number(id));
+    }
     if (t.dataset.mapa && onShowInMap) {
       const [store, id] = t.dataset.mapa.split(':');
       zamknijKarte();
@@ -1715,12 +1824,12 @@ export function createPlanView(containerId) {
     if (!przeciaganie.ruszone && Math.hypot(p.x - przeciaganie.start.x, p.y - przeciaganie.start.y) < 5) return;
     przeciaganie.ruszone = true;
     przeciaganie.ostatni = p;
-    if (przeciaganie.obiekt && !stawianie) {
+    if (przeciaganie.obiekt && !stawianie && !SCHEMAT) {
       const [store, id] = przeciaganie.obiekt.split(':');
       const rec = (dane[store] || []).find((r) => r.id === Number(id));
       if (rec && store !== 'poleRozdzielcze') {
-        rec.plan_dx = (num(rec.plan_dx) || 0) + dx;
-        rec.plan_dy = (num(rec.plan_dy) || 0) + dy;
+        rec.plan_dx = (num(rec.plan_dx) || 0) + dx / skalaPowiekszenia();
+        rec.plan_dy = (num(rec.plan_dy) || 0) + dy / skalaPowiekszenia();
         render();
       }
     } else {
@@ -1746,7 +1855,7 @@ export function createPlanView(containerId) {
     if (!s) return;
     const p = punktZdarzenia(e);
     if (s.ruszone) {
-      if (s.obiekt && !stawianie) {
+      if (s.obiekt && !stawianie && !SCHEMAT) {
         const [store, id] = s.obiekt.split(':');
         const rec = (dane[store] || []).find((r) => r.id === Number(id));
         if (rec && store !== 'poleRozdzielcze') {
@@ -1785,6 +1894,7 @@ export function createPlanView(containerId) {
   async function init(opts = {}) {
     onEditRecord = opts.onEditRecord || null;
     onShowInMap = opts.onShowInMap || null;
+    onPokazWInnymWidoku = opts.onPokazWInnymWidoku || null;
     await wczytajDane();
     render();
   }
@@ -1797,6 +1907,7 @@ export function createPlanView(containerId) {
     const rec = (dane[store] || []).find((r) => r.id === id);
     if (!rec) return false;
     const p = pozycje[`${store}:${id}`];
+    if (!p && SCHEMAT) return false;
     if (!p) {
       if (store === 'poleRozdzielcze') {
         stawianieEl.innerHTML = `<b>${esc(rec.p_nazwa)}</b> pojawi się na planie, gdy jego rozdzielnia stanie przy chodniku. <button type="button" class="btn-small" data-akcja="anuluj-stawianie">OK</button>`;
@@ -1821,5 +1932,5 @@ export function createPlanView(containerId) {
     return true;
   }
 
-  return { init, pokaz, _test: { rejony, obcyRejon, ustawRejon: (r, pokazInne = true) => { mojRejon = r; warstwy.inneOddzialy = pokazInne; }, oddzialRek, ustawOddzial: (o, pokazInne = true) => { mojOddzial = o; warstwy.inneOddzialy = pokazInne; }, opisChodnika, opcjePrzy, pozycje: () => rysuj(widok, { szer: 1000, wys: 700 }).poz, problemTypu, napieciaDoWyboru, katalog: () => katalog, zrodlaDla, odplywyDla, zgodnePolaczenie, problemyPolaczenia, rodzajPolaczenia, opcjeNapieciaFormularza, napiecieEfektywne, kilkaOdplywow, polaczenia: () => polaczenia().wynik, wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
+  return { init, pokaz, _test: { ukladSchematu, tryb, rejony, obcyRejon, ustawRejon: (r, pokazInne = true) => { mojRejon = r; warstwy.inneOddzialy = pokazInne; }, oddzialRek, ustawOddzial: (o, pokazInne = true) => { mojOddzial = o; warstwy.inneOddzialy = pokazInne; }, opisChodnika, opcjePrzy, pozycje: () => rysuj(widok, { szer: 1000, wys: 700 }).poz, problemTypu, napieciaDoWyboru, katalog: () => katalog, zrodlaDla, odplywyDla, zgodnePolaczenie, problemyPolaczenia, rodzajPolaczenia, opcjeNapieciaFormularza, napiecieEfektywne, kilkaOdplywow, polaczenia: () => polaczenia().wynik, wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
 }
