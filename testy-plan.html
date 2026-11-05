@@ -295,6 +295,30 @@ try {
   ok(T.opisChodnika(chod) === 'nr 3 Chodnik 3 (odstawczy)', `opis chodnika: ${T.opisChodnika(chod)}`);
   ok(T.opcjePrzy('urzadzenia', WN)[0].opis.includes('(nr 1 Chodnik 1 (transportowy))') || T.opcjePrzy('urzadzenia', WN)[0].opis.includes('(nr '), `napęd w liście „stoi przy” z chodnikiem (${T.opcjePrzy('urzadzenia', WN)[0].opis})`);
   ok([...svg.querySelectorAll('text')].some((x) => x.textContent === 'nr 5 Chodnik 5 (przodek) (dowierzchnia)'), 'na planie chodnik z nr i rodzajem');
+  // 12) Oddział elektryczny i rozdzielnia poza rejonem (05.11.2026)
+  const t8rec = (await db.nadzorGetAll('transformatory')).find((r) => r.id === T8);
+  await db.nadzorUpdate('transformatory', { ...t8rec, oddzial: 'ścianowy', lok_chodnik: chod.id, lok_metraz: 50, lok_strona: 'lewa' });
+  const w05rec = (await db.nadzorGetAll('urzadzenia')).find((r) => r.id === W05);
+  await db.nadzorUpdate('urzadzenia', { ...w05rec, lok_chodnik: chod.id, lok_metraz: 60, lok_strona: 'prawa' });
+  await plan.init({});
+  ok(T.oddzialRek('urzadzenia', T.dane().urzadzenia.find((r) => r.id === W05)) === 'ścianowy', 'oddział dziedziczony od transformatora (W-05 z DWU-8 ścianowego)');
+  T.ustawOddzial('odstawczy', true);
+  let poz12 = T.pozycje();
+  ok(poz12[`urzadzenia:${W05}`]?.obcy === true && poz12[`transformatory:${T8}`]?.obcy === true, 'oddział planu odstawczy: elementy ścianowe wyblakłe');
+  T.ustawOddzial('odstawczy', false);
+  poz12 = T.pozycje();
+  ok(!poz12[`urzadzenia:${W05}`] && !poz12[`transformatory:${T8}`], 'ukryte elementy innych oddziałów nie są rysowane');
+  T.ustawOddzial('wszystkie', true);
+  const RZ = await db.nadzorAdd('rozdzielnie', { nazwa_r: 'R-ZDALNA', r_napiecie: '6 kV' });
+  const PZ = await db.nadzorAdd('poleRozdzielcze', { p_nazwa: 'R-ZDALNA pole 7', miejsce_zabudowy: RZ });
+  const TZ = await db.nadzorAdd('transformatory', { t_nr: 'ZDAL-T', t_napiecie: '6/1 kV', zasilany_z_pola: PZ, lok_chodnik: chod.id, lok_metraz: 120, lok_strona: 'lewa' });
+  await db.nadzorAdd('rozdzielnie', { nazwa_r: 'R-OBCA', r_napiecie: '6 kV' });
+  await plan.init({});
+  const poz12b = T.pozycje();
+  ok(poz12b[`rozdzielnie:${RZ}`]?.zdalna && poz12b[`poleRozdzielcze:${PZ}`] && poz12b[`transformatory:${TZ}`], 'rozdzielnia poza rejonem narysowana przed początkiem schematu, z polem');
+  ok(!Object.values(poz12b).some((p) => p.rec?.nazwa_r === 'R-OBCA'), 'rozdzielnia bez odbiorów w rejonie nie jest rysowana');
+  ok([...svg.querySelectorAll('text')].some((x) => x.textContent === 'R-ZDALNA (poza rejonem)'), 'opis: R-ZDALNA (poza rejonem)');
+  ok(!svg.innerHTML.includes('NaN'), 'brak NaN po rozdzielni poza rejonem');
   window.__niezgodne = [...document.querySelectorAll('#plan-braki details')].find((d) => d.textContent.includes('niezgodne'))?.textContent || '';
   window.__gotowe = true;
 } catch (e) {

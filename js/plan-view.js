@@ -129,7 +129,10 @@ export function createPlanView(containerId) {
   try { wielkosc = localStorage.getItem('protektor-plan-symbole') || 'srednie'; } catch {}
   if (!SKALE[wielkosc]) wielkosc = 'srednie';
   const sk = () => SKALE[wielkosc];
-  const WARSTWY_DOMYSLNE = { chodniki: true, przenosniki: true, obiekty: true, daneObiektow: true, kable: true, napiecieKabli: true, opisyKabli: true, zrodlo: false };
+  const WARSTWY_DOMYSLNE = { chodniki: true, przenosniki: true, obiekty: true, daneObiektow: true, kable: true, napiecieKabli: true, opisyKabli: true, zrodlo: false, inneOddzialy: true };
+  const ODDZIALY = ['odstawczy', 'przodkowy', 'ścianowy', 'inny'];
+  let mojOddzial = 'wszystkie';
+  try { mojOddzial = localStorage.getItem('protektor-plan-oddzial') || 'wszystkie'; } catch {}
   let warstwy = { ...WARSTWY_DOMYSLNE };
   try { Object.assign(warstwy, JSON.parse(localStorage.getItem('protektor-plan-warstwy') || '{}')); } catch {}
   const zaznacz = (k) => (warstwy[k] ? 'checked' : '');
@@ -168,7 +171,11 @@ export function createPlanView(containerId) {
         <label><input type="checkbox" data-warstwa="napiecieKabli" ${zaznacz('napiecieKabli')}> Znaczniki napięcia kabli (6 kV / 1 kV / 0,5 kV)</label>
         <label><input type="checkbox" data-warstwa="opisyKabli" ${zaznacz('opisyKabli')}> Opisy kabli (nr, typ, przekrój, długość)</label>
         <label><input type="checkbox" data-warstwa="zrodlo" ${zaznacz('zrodlo')}> Źródło danych (kolor obrysu)</label>
+        <label><input type="checkbox" data-warstwa="inneOddzialy" ${zaznacz('inneOddzialy')}> Elementy innych oddziałów (wyblakłe)</label>
       </details>
+      <label class="plan-oddzial">Oddział
+        <select data-akcja-oddzial>${['wszystkie', ...ODDZIALY].map((o) => `<option ${o === mojOddzial ? 'selected' : ''}>${o}</option>`).join('')}</select>
+      </label>
     </div>
     <div id="plan-baner" class="plan-baner hidden"></div>
     <div id="plan-stawianie" class="plan-stawianie hidden"></div>
@@ -280,8 +287,33 @@ export function createPlanView(containerId) {
     return { ch: ch.id, m: num(rec.lok_metraz), strona: rec.lok_strona || 'lewa' };
   }
 
+  // początek schematu: pierwszy chodnik bez chodnika macierzystego
+  const chodnikPoczatkowy = () => [...geo.values()].find((g) => !rozwiaz(g.rec.ch_od_chodnika, dane.chodniki || [], 'ch_nazwa')) || [...geo.values()][0] || null;
+  function punktZdalny(i) {
+    const g = chodnikPoczatkowy();
+    if (!g) return null;
+    const L = Math.max(40, Math.min(120, g.len * 0.35));
+    return { p: { x: g.x0 - g.dx * L + g.nx * 30 * i, y: g.y0 - g.dy * L + g.ny * 30 * i }, lok: { ch: g.rec.id, m: 0, strona: 'lewa', zdalna: true } };
+  }
+  function rozdzielnieZdalne(poz) {
+    const wynik = [];
+    for (const r of dane.rozdzielnie || []) {
+      if ((poz && poz[`rozdzielnie:${r.id}`]) || lokalizacja('rozdzielnie', r)) continue;
+      const pola = new Set((dane.poleRozdzielcze || []).filter((pl) => rozwiaz(pl.miejsce_zabudowy, dane.rozdzielnie || [], 'nazwa_r')?.id === r.id).map((pl) => pl.id));
+      const zasilaPlan = polaczenia().wynik.some((p) => ((p.zrodlo.store === 'poleRozdzielcze' && pola.has(p.zrodlo.rec.id)) || (p.zrodlo.store === 'rozdzielnie' && p.zrodlo.rec.id === r.id))
+        && p.cel.store !== 'poleRozdzielcze' && p.cel.store !== 'rozdzielnie' && (poz ? poz[`${p.cel.store}:${p.cel.rec.id}`] : lokalizacja(p.cel.store, p.cel.rec) && !ukryty(p.cel.store, p.cel.rec)));
+      if (zasilaPlan) wynik.push(r);
+    }
+    return wynik;
+  }
+
   function obszarSwiata() {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const zdalnych = Math.min(4, rozdzielnieZdalne(null).length);
+    for (let i = 0; i < zdalnych; i += 1) {
+      const pk = punktZdalny(i);
+      if (pk) { minX = Math.min(minX, pk.p.x); minY = Math.min(minY, pk.p.y); maxX = Math.max(maxX, pk.p.x); maxY = Math.max(maxY, pk.p.y); }
+    }
     for (const g of geo.values()) {
       for (const p of [{ x: g.x0, y: g.y0 }, { x: g.x0 + g.dx * g.len, y: g.y0 + g.dy * g.len }]) {
         minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
@@ -505,6 +537,7 @@ export function createPlanView(containerId) {
     const stos = {};
     for (const def of OBIEKTY) {
       for (const rec of dane[def.store] || []) {
+        if (ukryty(def.store, rec)) continue;
         const lok = lokalizacja(def.store, rec);
         if (!lok || !geo.has(lok.ch)) continue;
         const g = geo.get(lok.ch);
@@ -525,9 +558,18 @@ export function createPlanView(containerId) {
         }
         x += num(rec.plan_dx) || 0;
         y += num(rec.plan_dy) || 0;
-        poz[`${def.store}:${rec.id}`] = { x, y, lok, def: def.store === 'urzadzenia' && jestOdbiornik(rec) ? { ...def, symbol: 'naped' } : def, rec };
+        poz[`${def.store}:${rec.id}`] = { x, y, lok, def: def.store === 'urzadzenia' && jestOdbiornik(rec) ? { ...def, symbol: 'naped' } : def, rec, obcy: obcyOddzial(def.store, rec) };
       }
     }
+    // 05.11.2026: rozdzielnia poza rejonem (może być daleko od początku schematu) — rysowana przed początkiem
+    // pierwszego chodnika, gdy jej pole zasila coś, co jest na planie; kabel idzie od niej do chodnika i dalej
+    const zdalne = rozdzielnieZdalne(poz);
+    zdalne.forEach((r, i) => {
+      const pk = punktZdalny(i);
+      if (!pk) return;
+      const p = naEkran(pk.p, v);
+      poz[`rozdzielnie:${r.id}`] = { x: p.x + (num(r.plan_dx) || 0), y: p.y + (num(r.plan_dy) || 0), lok: pk.lok, rec: r, zdalna: true, def: OBIEKTY[0] };
+    });
     // pola rozdzielcze — rząd kwadracików przy swojej rozdzielni
     const polaRozdz = {};
     for (const pole of dane.poleRozdzielcze || []) {
@@ -540,10 +582,11 @@ export function createPlanView(containerId) {
     }
     // napędy przenośników
     for (const pr of dane.przenosniki || []) {
+      if (ukryty('przenosniki', pr)) continue;
       const lok = lokalizacja('przenosniki', pr);
       if (!lok || !geo.has(lok.ch)) continue;
       const p = naEkran(punktM(lok.ch, lok.m), v);
-      poz[`przenosniki:${pr.id}`] = { x: p.x + (num(pr.plan_dx) || 0), y: p.y + (num(pr.plan_dy) || 0), lok, rec: pr, def: { store: 'przenosniki', symbol: 'naped', label: 'Przenośnik / napęd', title: 'pr_nr' } };
+      poz[`przenosniki:${pr.id}`] = { x: p.x + (num(pr.plan_dx) || 0), y: p.y + (num(pr.plan_dy) || 0), lok, rec: pr, obcy: obcyOddzial('przenosniki', pr), def: { store: 'przenosniki', symbol: 'naped', label: 'Przenośnik / napęd', title: 'pr_nr' } };
     }
 
     // zarezerwuj miejsca symboli, zanim rozmieścimy opisy
@@ -594,7 +637,8 @@ export function createPlanView(containerId) {
       punkty.push({ x: b.x, y: b.y });
       punkty = punkty.filter((q, i) => i === 0 || Math.hypot(q.x - punkty[i - 1].x, q.y - punkty[i - 1].y) > 0.5);
       const idKabla = `${p.cel.store}:${p.cel.rec.id}:${p.prefiks}`;
-      czesci.kable.push(`<polyline points="${punkty.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(' ')}" fill="none" stroke="${kolor}" stroke-width="${grubKabla.toFixed(1)}"${kreski} stroke-linejoin="round"/><polyline points="${punkty.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(' ')}" fill="none" stroke="transparent" stroke-width="12" data-kabel="${esc(idKabla)}" class="plan-klik"/>`);
+      const blade = a.obcy || b.obcy ? ' opacity="0.35"' : '';
+      czesci.kable.push(`<polyline points="${punkty.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(' ')}" fill="none" stroke="${kolor}" stroke-width="${grubKabla.toFixed(1)}"${kreski}${blade} stroke-linejoin="round"/><polyline points="${punkty.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(' ')}" fill="none" stroke="transparent" stroke-width="12" data-kabel="${esc(idKabla)}" class="plan-klik"/>`);
       if (warstwy.napiecieKabli || warstwy.opisyKabli) {
         let naj = 0;
         let s = [punkty[0], punkty[1] || punkty[0]];
@@ -617,10 +661,12 @@ export function createPlanView(containerId) {
       if (def.store === 'przenosniki' && !warstwy.przenosniki) continue;
       if (def.store !== 'przenosniki' && !warstwy.obiekty) continue;
       const obw = warstwy.zrodlo ? KOLOR.zrodlo[rec.zrodlo_danych || ''] || KOLOR.zrodlo[''] : KOLOR.obrys;
-      czesci.obiekty.push(`<g data-obiekt="${esc(klucz)}" class="plan-klik">${symbol(def.symbol, p.x, p.y, obw, sk(), napiecieObiektu(def.store, rec))}</g>`);
+      czesci.obiekty.push(`<g data-obiekt="${esc(klucz)}" class="plan-klik"${p.obcy ? ' opacity="0.35"' : ''}>${symbol(def.symbol, p.x, p.y, obw, sk(), napiecieObiektu(def.store, rec))}</g>`);
       if (def.store === 'poleRozdzielcze') continue;
       const [rx, ry] = rozmiarSymbolu(def.symbol);
-      const tytul = def.store === 'przenosniki' ? [rec.pr_typ, rec.pr_nr].filter(Boolean).join(' ') : rec[def.title];
+      let tytul = def.store === 'przenosniki' ? [rec.pr_typ, rec.pr_nr].filter(Boolean).join(' ') : rec[def.title];
+      if (p.zdalna) tytul = `${tytul || ''} (poza rejonem)`;
+      if (p.obcy) tytul = `${tytul || ''} · odd. ${oddzialRek(def.store, rec)}`;
       const pol = opis(p.x, p.y, tytul || '(bez nazwy)', { rx, ry, wazny: def.store === 'rozdzielnie' || def.store === 'kb' });
       if (warstwy.daneObiektow) podpis(pol, daneObiektu(def.store, rec));
     }
@@ -749,12 +795,12 @@ export function createPlanView(containerId) {
     const bezPolozenia = [];
     for (const def of OBIEKTY) {
       for (const rec of dane[def.store] || []) {
-        if (!w.poz[`${def.store}:${rec.id}`]) bezPolozenia.push({ def, rec });
+        if (!w.poz[`${def.store}:${rec.id}`] && !ukryty(def.store, rec)) bezPolozenia.push({ def, rec });
       }
     }
     const przenBez = (dane.przenosniki || []).filter((r) => !w.poz[`przenosniki:${r.id}`]);
     const bezKabla = w.kable.filter((k) => !maOpisKabla(k.cel.rec, k.prefiks));
-    const niewidoczne = w.kable.filter((k) => !k.narysowany);
+    const niewidoczne = w.kable.filter((k) => !k.narysowany && !ukryty(k.cel.store, k.cel.rec) && !ukryty(k.zrodlo.store, k.zrodlo.rec));
     const chodnikiBraki = [...geo.values()].filter((g) => g.brakDanych);
     const niezgodne = w.kable.map((k) => ({ k, pow: problemyPolaczenia(k, w.kable) })).filter((x) => x.pow.length);
     const doSprawdzenia = kilkaOdplywow(w.kable);
@@ -810,6 +856,8 @@ export function createPlanView(containerId) {
       .join('');
     const chNap = store === 'przenosniki' ? chodnikNapedu(rec) : rozwiaz(rec.lok_chodnik, dane.chodniki || [], 'ch_nazwa');
     const wChodniku = chNap && !przyObiekcie(rec) ? `<p class="plan-karta-kabel">Chodnik: ${esc(opisChodnika(chNap))}${chNap.ch_nr || chNap.ch_rodzaj ? '' : ' — nr i rodzaj chodnika można dopisać w zakładce Chodniki'} <button type="button" class="btn-small" data-edytuj="chodniki:${chNap.id}">Edytuj chodnik</button></p>` : '';
+    const odd = oddzialRek(store, rec);
+    const oddz = odd && !rec.oddzial ? `<p class="plan-karta-kabel">Oddział: ${esc(odd)} (jak źródło zasilania)</p>` : '';
     const przy = przyObiekcie(rec);
     const umiejsc = przy ? `<p class="plan-karta-kabel">Umiejscowienie: przy ${esc(opisObiektu(przy.store, przy.rec))}</p>` : '';
     const kabel = maOpisKabla(rec, 'kabel') ? `<p class="plan-karta-kabel">Kabel zasilający: ${esc(opisKabla(rec, 'kabel'))}${rec.kabel_odplyw ? ` (odpływ: ${esc(rec.kabel_odplyw)})` : ''}</p>` : '';
@@ -817,6 +865,7 @@ export function createPlanView(containerId) {
       <h4>${esc(def.labelSingular)}: ${esc(rec[def.titleField] || '')}</h4>
       <table>${wiersze}</table>
       ${wChodniku}
+      ${oddz}
       ${umiejsc}
       ${kabel}
       <div class="form-actions">
@@ -920,6 +969,17 @@ export function createPlanView(containerId) {
     await wczytajDane();
     render();
   }
+
+  // Oddział elektryczny (05.11.2026): wpisany przy elemencie albo jak źródło (transformator) — rozdzielnie i pola wspólne
+  function oddzialRek(store, rec, d = 0) {
+    if (!rec || d > 12) return '';
+    if (rec.oddzial) return rec.oddzial;
+    if (store === 'rozdzielnie' || store === 'poleRozdzielcze') return '';
+    const zr = zrodloRek(store, rec);
+    return zr && zr.store !== 'poleRozdzielcze' ? oddzialRek(zr.store, zr.rec, d + 1) : '';
+  }
+  const obcyOddzial = (store, rec) => { const o = oddzialRek(store, rec); return mojOddzial !== 'wszystkie' && !!o && o !== mojOddzial; };
+  const ukryty = (store, rec) => !warstwy.inneOddzialy && obcyOddzial(store, rec);
 
   // opis chodnika: "nr 2 Chodnik 1 (odstawczy)"
   const opisChodnika = (ch) => (ch ? [ch.ch_nr ? `nr ${ch.ch_nr}` : '', ch.ch_nazwa || '', ch.ch_rodzaj ? `(${ch.ch_rodzaj})` : ''].filter(Boolean).join(' ') : '');
@@ -1599,6 +1659,11 @@ export function createPlanView(containerId) {
     }
   });
 
+  container.querySelector('[data-akcja-oddzial]').addEventListener('change', (e) => {
+    mojOddzial = e.target.value;
+    try { localStorage.setItem('protektor-plan-oddzial', mojOddzial); } catch {}
+    render();
+  });
   container.querySelector('[data-akcja-wielkosc]').addEventListener('change', (e) => {
     wielkosc = e.target.value;
     try { localStorage.setItem('protektor-plan-symbole', wielkosc); } catch {}
@@ -1755,5 +1820,5 @@ export function createPlanView(containerId) {
     return true;
   }
 
-  return { init, pokaz, _test: { opisChodnika, opcjePrzy, pozycje: () => rysuj(widok, { szer: 1000, wys: 700 }).poz, problemTypu, napieciaDoWyboru, katalog: () => katalog, zrodlaDla, odplywyDla, zgodnePolaczenie, problemyPolaczenia, rodzajPolaczenia, opcjeNapieciaFormularza, napiecieEfektywne, kilkaOdplywow, polaczenia: () => polaczenia().wynik, wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
+  return { init, pokaz, _test: { oddzialRek, ustawOddzial: (o, pokazInne = true) => { mojOddzial = o; warstwy.inneOddzialy = pokazInne; }, opisChodnika, opcjePrzy, pozycje: () => rysuj(widok, { szer: 1000, wys: 700 }).poz, problemTypu, napieciaDoWyboru, katalog: () => katalog, zrodlaDla, odplywyDla, zgodnePolaczenie, problemyPolaczenia, rodzajPolaczenia, opcjeNapieciaFormularza, napiecieEfektywne, kilkaOdplywow, polaczenia: () => polaczenia().wynik, wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
 }

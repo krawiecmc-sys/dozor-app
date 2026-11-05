@@ -157,6 +157,7 @@ export const NADZOR_ENTITIES = {
     fields: [
       { key: 't_nr', label: 'Nr transformatora', type: 'text', required: true },
       { key: 't_nr_kop', label: 'Nr kopalniany', type: 'text', hint: 'Łączy wykaz stacji, schemat rozdzielni i zabezpieczenia (np. „nr 901” pod polem).' },
+      { key: 'oddzial', label: 'Oddział elektryczny (użytkownik)', type: 'select', options: ['', 'odstawczy', 'przodkowy', 'ścianowy', 'inny'], hint: 'Na tej samej sieci są transformatory i urządzenia innych oddziałów — na Planie rejonu widać je wyblakłe albo ukryte. Puste: jak transformator, z którego zasilane.' },
       { key: 't_typ', label: 'Typ', type: 'text' },
       { key: 't_moc', label: 'Moc (kVA)', type: 'number', blank: true },
       { key: 't_napiecie', label: 'Napięcie', type: 'select', options: ['6/1 kV', '6/0,5 kV', '6/0,5/1 kV'] },
@@ -225,6 +226,7 @@ export const NADZOR_ENTITIES = {
       { key: 'nazwa', label: 'Nazwa / oznaczenie urządzenia', type: 'text', required: true },
       { key: 'symbol', label: 'Symbol', type: 'text' },
       { key: 'u_rodzaj', label: 'Rodzaj', type: 'select', options: U_RODZAJE, hint: 'Transformator zasila wyłączniki / aparaty. Odbiornik (silnik, pompa, wentylator) zasilany jest z wyłącznika.' },
+      { key: 'oddzial', label: 'Oddział elektryczny (użytkownik)', type: 'select', options: ['', 'odstawczy', 'przodkowy', 'ścianowy', 'inny'], hint: 'Na tej samej sieci są transformatory i urządzenia innych oddziałów — na Planie rejonu widać je wyblakłe albo ukryte. Puste: jak transformator, z którego zasilane.' },
       { key: 'moc', label: 'Moc (kW)', type: 'number' },
       { key: 'nap_zas', label: 'Napięcie zasilania', type: 'select', options: ['0,5 kV', '1 kV', '6 kV'] },
       {
@@ -265,6 +267,7 @@ export const NADZOR_ENTITIES = {
     fields: [
       { key: 'typ_kb', label: 'Typ', type: 'select', options: ['ścianowy', 'przodkowy', 'spągoładowarka'], required: true },
       { key: 'kb_nazwa', label: 'Nazwa / numer', type: 'text', required: true },
+      { key: 'oddzial', label: 'Oddział elektryczny (użytkownik)', type: 'select', options: ['', 'odstawczy', 'przodkowy', 'ścianowy', 'inny'], hint: 'Na tej samej sieci są transformatory i urządzenia innych oddziałów — na Planie rejonu widać je wyblakłe albo ukryte. Puste: jak transformator, z którego zasilane.' },
       {
         // 31.08.2026: przełączone z bezpośredniego zasilania z Pola
         // rozdzielczego na zasilanie z Transformatora, po dopisaniu
