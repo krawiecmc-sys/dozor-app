@@ -320,6 +320,18 @@ export function createPlanView(containerId, ustawienia = {}) {
     }
     const poziomRodz = (k) => POZIOM_RODZAJU[rodzajRek(wezly.get(k).st, wezly.get(k).rec)] ?? 3;
     korzenie.sort((a, b) => poziomRodz(a) - poziomRodz(b));
+    // 05.11.2026 (Piotr): kombajn na końcu rejonu — gałąź z KB idzie ostatnia (z prawej), a KB stoi w ostatnim rzędzie
+    const zKB = new Map();
+    const maKB = (k, d = 0) => {
+      if (zKB.has(k)) return zKB.get(k);
+      zKB.set(k, false);
+      const w = wezly.get(k);
+      const wynik = w.st === 'kb' || (d < 60 && [...w.dzieci, ...w.przeloty].some((x) => maKB(x, d + 1)));
+      zKB.set(k, wynik);
+      return wynik;
+    };
+    for (const w of wezly.values()) w.dzieci.sort((a, b) => Number(maKB(a)) - Number(maKB(b)));
+    korzenie.sort((a, b) => poziomRodz(a) - poziomRodz(b) || Number(maKB(a)) - Number(maKB(b)));
     const uklad = new Map();
     let kolumna = 0;
     const odwiedzone = new Set();
@@ -338,6 +350,8 @@ export function createPlanView(containerId, ustawienia = {}) {
       umiesc(k, poziomRodz(k));
       kolumna += 1; // odstęp między gałęziami
     }
+    const ostatni = Math.max(0, ...[...uklad.entries()].filter(([k]) => !k.startsWith('kb:')).map(([, q]) => q.y));
+    for (const [k, q] of uklad) if (k.startsWith('kb:') && q.y < ostatni + SCH_DY) q.y = ostatni + SCH_DY;
     schCache = { dane, uklad };
     schKlucz = kluczStanu;
     return uklad;

@@ -361,6 +361,9 @@ try {
   ok(Math.abs(kG('transformatory', TA).y - kG('transformatory', TB).y) < 1 && kG('transformatory', TB).x > kG('transformatory', TA).x, 'przelot 6 kV trafo → trafo na tym samym poziomie, obok');
   const kbAM9 = T.dane().kb.find((r) => r.kb_nazwa === 'AM-9');
   ok(kG('kb', kbAM9.id) && kG('kb', kbAM9.id).y > kG('urzadzenia', WA).y, 'KB pod swoim wyłącznikiem');
+  const yNieKB = Math.max(...Object.entries(pg).filter(([k]) => !k.startsWith('kb:')).map(([, q]) => q.y));
+  ok(Object.entries(pg).filter(([k]) => k.startsWith('kb:')).every(([, q]) => q.y > yNieKB), 'KB na końcu rejonu — w ostatnim rzędzie grafu');
+  ok(kG('urzadzenia', WA).x > kG('urzadzenia', WP).x, 'gałąź z KB ostatnia (z prawej) przy swoim transformatorze');
   const svgG = document.querySelector('#graf-content svg');
   ok(svgG.querySelectorAll('[data-kabel]').length >= 8 && !svgG.innerHTML.includes('NaN') && svgG.innerHTML.includes('stroke-dasharray="6 3.5"'), 'kable w grafie z regułami planu (odpływ przerywany), bez NaN');
   ok(G.polaczenia().length === T.polaczenia().length, `graf i plan mają te same połączenia (${G.polaczenia().length})`);
