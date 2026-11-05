@@ -1610,7 +1610,9 @@ export function createPlanView(containerId, ustawienia = {}) {
           <select name="rodzaj">${RODZAJE.map((r) => `<option value="${r.id}" ${r.id === rodzaj.id ? 'selected' : ''}>${r.label}</option>`).join('')}</select>
         </label>
         <label>Nazwa / numer
-          <input name="nazwa" required placeholder="${esc(rodzaj.przyklad)}">
+          <input name="nazwa" required placeholder="${esc(rodzaj.przyklad)}" list="plan-podpowiedzi-${tryb}" autocomplete="off">
+          <datalist id="plan-podpowiedzi-${tryb}"></datalist>
+          <span class="field-hint" data-istniejacy></span>
         </label>
         ${rodzaj.nap ? `<label>Napięcie
           <select name="napiecie">${rodzaj.nap.opcje.map((o) => `<option>${o}</option>`).join('')}</select>
@@ -1636,11 +1638,51 @@ export function createPlanView(containerId, ustawienia = {}) {
       </div>`;
     dodajEl.classList.remove('hidden');
     odswiezNapiecie(rodzaj.id);
+    odswiezPodpowiedzi();
     dodajEl.querySelector('[name="nazwa"]').focus();
     dodajEl.scrollIntoView({ block: 'nearest' });
   }
 
   const zamknijDodawanie = () => { dodajEl.classList.add('hidden'); dodajEl.innerHTML = ''; };
+
+  // 06.11.2026 (Piotr): podpowiedzi z tabel — zapisane rozdzielnie, pola wybranej rozdzielni, transformatory, urządzenia…
+  // Wybór istniejącego rekordu stawia go na planie (bez duplikatu); nowa nazwa tworzy nowy rekord.
+  function istniejaceRodzaju(rodzajId, rozdzielniaId = null) {
+    const r = rodzajDef(rodzajId);
+    if (!r) return [];
+    return (dane[r.store] || []).filter((rec) => rodzajRek(r.store, rec) === rodzajId
+      && (rodzajId !== 'poleRozdzielcze' || rozwiaz(rec.miejsce_zabudowy, dane.rozdzielnie || [], 'nazwa_r')?.id === rozdzielniaId));
+  }
+  const normNazwa = (t) => String(t || '').trim().toLowerCase();
+  function znajdzIstniejacy(rodzajId, nazwa, rozdzielniaId) {
+    const r = rodzajDef(rodzajId);
+    return r ? istniejaceRodzaju(rodzajId, rozdzielniaId).find((rec) => normNazwa(rec[r.nazwa]) === normNazwa(nazwa)) || null : null;
+  }
+  function odswiezPodpowiedzi() {
+    const rodzajId = dodajEl.querySelector('[name="rodzaj"]')?.value;
+    const lista = dodajEl.querySelector(`#plan-podpowiedzi-${tryb}`);
+    const r = rodzajDef(rodzajId);
+    if (!lista || !r) return;
+    const rozdz = Number(dodajEl.querySelector('[name="rozdzielnia"]')?.value) || null;
+    const recs = rodzajId === 'poleRozdzielcze' && !rozdz ? [] : istniejaceRodzaju(rodzajId, rozdz);
+    lista.innerHTML = recs.map((rec) => {
+      const naPlanie = SCHEMAT || pozycje[`${r.store}:${rec.id}`];
+      return `<option value="${esc(rec[r.nazwa] || '')}">${naPlanie ? 'już na planie' : 'z tabeli — bez położenia'}</option>`;
+    }).join('');
+    odswiezIstniejacy();
+  }
+  function odswiezIstniejacy() {
+    const uw = dodajEl.querySelector('[data-istniejacy]');
+    if (!uw) return;
+    const rodzajId = dodajEl.querySelector('[name="rodzaj"]')?.value;
+    const rozdz = Number(dodajEl.querySelector('[name="rozdzielnia"]')?.value) || null;
+    const ile = (rodzajId === 'poleRozdzielcze' && !rozdz) ? 0 : istniejaceRodzaju(rodzajId, rozdz).length;
+    const ist = znajdzIstniejacy(rodzajId, dodajEl.querySelector('[name="nazwa"]')?.value, rozdz);
+    uw.textContent = ist
+      ? 'Istniejący rekord z tabeli — zostanie postawiony na planie, nie powstanie duplikat (podane zasilanie i odpływ zostaną dopisane).'
+      : ile ? `Podpowiedzi z tabeli${rodzajId === 'poleRozdzielcze' ? ' dla tej rozdzielni' : ''}: ${ile} (rozwiń listę w polu nazwy). Nowa nazwa = nowy rekord.`
+        : rodzajId === 'poleRozdzielcze' && !rozdz ? 'Wybierz rozdzielnię — podpowiem jej pola z tabeli.' : '';
+  }
 
   async function zapiszDodawanie() {
     const f = new FormData(dodajEl);
@@ -1660,8 +1702,21 @@ export function createPlanView(containerId, ustawienia = {}) {
       przy = ci ? `${cs}:${ci}` : '';
     }
     if (przy) Object.assign(rec, { lok_przy: przy, lok_strona: 'prawa' });
-    const noweId = await nadzorAdd(store, rec);
-    if (idZr && pole === 'przelot') {
+    const ist = znajdzIstniejacy(rodzaj.id, nazwa, rodzaj.id === 'poleRozdzielcze' ? rec.miejsce_zabudowy : null);
+    let noweId;
+    if (ist) {
+      // istniejący rekord z tabeli: dopisz tylko to, co podano w formularzu (zasilanie, napięcie, stoi przy)
+      const swiezy = (await nadzorGetAll(store)).find((x) => x.id === ist.id) || ist;
+      let nowy = { ...swiezy };
+      if (idZr && pole !== 'przelot') nowy = zZasilaniem(store, nowy, pole, Number(idZr));
+      if (rodzaj.nap && f.get('napiecie') && !swiezy[rodzaj.nap.key]) nowy[rodzaj.nap.key] = f.get('napiecie');
+      if (przy) Object.assign(nowy, { lok_przy: przy, lok_strona: 'prawa' });
+      await nadzorUpdate(store, nowy);
+      noweId = ist.id;
+    } else {
+      noweId = await nadzorAdd(store, rec);
+    }
+    if (idZr && pole === 'przelot' && !ist) {
       // rozdzielnia zasilona przelotem: jej pole zasilające z kablem od pola źródłowego
       await nadzorAdd('poleRozdzielcze', { p_nazwa: `${nazwa} – pole zasilające`, miejsce_zabudowy: noweId, zasilane_z_pola: Number(idZr), zrodlo_danych: 'ręcznie' });
     }
@@ -1673,7 +1728,8 @@ export function createPlanView(containerId, ustawienia = {}) {
     zamknijDodawanie();
     await wczytajDane();
     render();
-    if (!SCHEMAT && store !== 'poleRozdzielcze' && !przy) zacznijStawianie(store, noweId);
+    const juzStoi = ist && lokalizacja(store, (dane[store] || []).find((x) => x.id === noweId) || ist);
+    if (!SCHEMAT && store !== 'poleRozdzielcze' && !przy && !juzStoi) zacznijStawianie(store, noweId);
   }
 
   // zmiana zasilania (i rodzaju urządzenia) istniejącego elementu
@@ -1755,9 +1811,12 @@ export function createPlanView(containerId, ustawienia = {}) {
     } else if (dodajEl.dataset.tryb === 'zasilanie' && e.target.name === 'u_rodzaj') {
       const [store, id] = String(dodajEl.dataset.cel).split(':');
       pokazZasilanie(store, Number(id), e.target.value === U_RODZAJE[1] ? 'odbiornik' : 'wylacznik');
+    } else if (dodajEl.dataset.tryb === 'dodaj' && ['kierunek', 'od', 'azymut'].includes(e.target.name)) {
+      odswiezKierunek();
+    } else if (dodajEl.dataset.tryb === 'dodaj' && e.target.name === 'rozdzielnia') {
+      odswiezPodpowiedzi();
     } else if (e.target.name === 'zrodlo') {
-      if (dodajEl.dataset.tryb === 'dodaj' && ['kierunek', 'od', 'azymut'].includes(e.target.name)) odswiezKierunek();
-      else if (dodajEl.dataset.tryb === 'dodaj' && dodajEl.querySelector('[name="rodzaj"]').value !== 'chodniki') odswiezNapiecie(dodajEl.querySelector('[name="rodzaj"]').value);
+      if (dodajEl.dataset.tryb === 'dodaj') odswiezNapiecie(dodajEl.querySelector('[name="rodzaj"]').value);
       else {
         const [store, id] = String(dodajEl.dataset.cel).split(':');
         odswiezNapiecie(dodajEl.dataset.rodzajUrz, (dane[store] || []).find((r) => r.id === Number(id)), dodajEl.dataset.obecneZrodlo);
@@ -1765,7 +1824,8 @@ export function createPlanView(containerId, ustawienia = {}) {
     }
   });
   dodajEl.addEventListener('input', (e) => {
-    if (dodajEl.dataset.tryb === 'dodaj' && e.target.name === 'nazwa') odswiezNapiecie(dodajEl.querySelector('[name="rodzaj"]').value);
+    if (dodajEl.dataset.tryb === 'dodaj' && e.target.name === 'nazwa') odswiezIstniejacy();
+    if (dodajEl.dataset.tryb === 'dodaj' && e.target.name === 'nazwa' && dodajEl.querySelector('[name="rodzaj"]').value !== 'chodniki') odswiezNapiecie(dodajEl.querySelector('[name="rodzaj"]').value);
   });
   dodajEl.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -2175,5 +2235,5 @@ export function createPlanView(containerId, ustawienia = {}) {
     return true;
   }
 
-  return { init, pokaz, _test: { jedynyOdbior, wylacznikiDaleko, problemySilnikow, problemNapiecia, ukladSchematu, tryb, rejony, obcyRejon, ustawRejon: (r, pokazInne = true) => { mojRejon = r; warstwy.inneOddzialy = pokazInne; }, oddzialRek, ustawOddzial: (o, pokazInne = true) => { mojOddzial = o; warstwy.inneOddzialy = pokazInne; }, opisChodnika, opcjePrzy, pozycje: () => rysuj(widok, { szer: 1000, wys: 700 }).poz, problemTypu, napieciaDoWyboru, katalog: () => katalog, zrodlaDla, odplywyDla, zgodnePolaczenie, problemyPolaczenia, rodzajPolaczenia, opcjeNapieciaFormularza, napiecieEfektywne, kilkaOdplywow, polaczenia: () => polaczenia().wynik, wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
+  return { init, pokaz, _test: { istniejaceRodzaju, znajdzIstniejacy, jedynyOdbior, wylacznikiDaleko, problemySilnikow, problemNapiecia, ukladSchematu, tryb, rejony, obcyRejon, ustawRejon: (r, pokazInne = true) => { mojRejon = r; warstwy.inneOddzialy = pokazInne; }, oddzialRek, ustawOddzial: (o, pokazInne = true) => { mojOddzial = o; warstwy.inneOddzialy = pokazInne; }, opisChodnika, opcjePrzy, pozycje: () => rysuj(widok, { szer: 1000, wys: 700 }).poz, problemTypu, napieciaDoWyboru, katalog: () => katalog, zrodlaDla, odplywyDla, zgodnePolaczenie, problemyPolaczenia, rodzajPolaczenia, opcjeNapieciaFormularza, napiecieEfektywne, kilkaOdplywow, polaczenia: () => polaczenia().wynik, wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
 }
