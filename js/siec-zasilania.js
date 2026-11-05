@@ -4,6 +4,7 @@
 // wpisywany przy każdym urządzeniu — wynika z sieci (rejon = KB: rozdzielnia i wszystko na sieci aż do
 // odbiorników końcowych).
 import { kv } from './symbole.js';
+import { nadzorGetAll, nadzorUpdate, nadzorDelete } from './db.js';
 
 // Skąd brać źródło zasilania dla danego magazynu: [pole FK, magazyn źródła, pole nazwy źródła, prefiks pól kabla]
 export const ZASILANIE = {
@@ -183,4 +184,33 @@ export function rejonySieci(dane) {
   }
   const lista = [...new Set([...wlasny.values()].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pl'));
   return { wlasny, wRejonie, lista };
+}
+
+// ---------- usuwanie elementu sieci (06.11.2026: wspólne dla Planu rejonu i Układu zasilania) ----------
+// Rozdzielnia usuwana razem ze swoimi polami; urządzeniom zasilanym z usuwanych elementów czyści się pole „zasilany z”
+// (trafiają do „bez zasilania”, nie znikają). opis(store, rec) — nazwa do pytania. Zwraca true, gdy usunięto.
+export async function usunElementSieci(dane, store, id, opis = (st, r) => r[TYTUL[st]] || `#${r.id}`) {
+  const rec = (dane[store] || []).find((r) => r.id === id);
+  if (!rec) return false;
+  const pola = store === 'rozdzielnie' ? (dane.poleRozdzielcze || []).filter((p) => rozwiaz(p.miejsce_zabudowy, dane.rozdzielnie || [], 'nazwa_r')?.id === id) : [];
+  const usuwane = [{ store, rec }, ...pola.map((p) => ({ store: 'poleRozdzielcze', rec: p }))];
+  const klucze = new Set(usuwane.map((d) => klucz(d.store, d.rec)));
+  const odbiory = polaczenia(dane).wynik.filter((p) => klucze.has(klucz(p.zrodlo.store, p.zrodlo.rec)) && !klucze.has(klucz(p.cel.store, p.cel.rec)));
+  const nazwyOdb = [...new Set(odbiory.map((p) => opis(p.cel.store, p.cel.rec)))];
+  const pytanie = `Usunąć ${opis(store, rec)}${pola.length ? ` razem z polami (${pola.length}): ${pola.map((p) => p.p_nazwa).join(', ')}` : ''}?`
+    + (nazwyOdb.length ? `\n\nZostaną bez zasilania: ${nazwyOdb.join(', ')}.` : '')
+    + '\n\nTego nie da się cofnąć (chyba że masz kopię — Eksport w Synchronizacji).';
+  if (!confirm(pytanie)) return false;
+  for (const p of odbiory) {
+    const swiezy = (await nadzorGetAll(p.cel.store)).find((r) => r.id === p.cel.rec.id);
+    if (!swiezy) continue;
+    const nowy = { ...swiezy };
+    for (const [pole, zStore, zPole] of ZASILANIE[p.cel.store] || []) {
+      const zr = rozwiaz(nowy[pole], dane[zStore] || [], zPole);
+      if (zr && klucze.has(`${zStore}:${zr.id}`)) nowy[pole] = '';
+    }
+    await nadzorUpdate(p.cel.store, nowy);
+  }
+  for (const d of usuwane) await nadzorDelete(d.store, d.rec.id);
+  return true;
 }

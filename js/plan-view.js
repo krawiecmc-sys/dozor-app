@@ -21,7 +21,7 @@ import { nadzorGetAll, nadzorUpdate, nadzorAdd, nadzorDelete } from './db.js';
 import { NADZOR_ENTITIES, U_RODZAJE } from './nadzor-entities.js';
 import { KOLOR, kolorNapiecia, kv, symbolSvg, napiecieRekordu, napieciaWtorne, rowneKV, napiecieSieci } from './symbole.js';
 import { wczytajKatalog, zapiszKatalog, typAparatu, NAPIECIA_KATALOGU } from './katalog-aparatow.js';
-import { ZASILANIE, jestOdbiornik, KONCOWE, rozwiaz, rodzajRek, polaczenia as polaczeniaSieci, zrodloRek as zrodloSieci, rodzajPolaczenia as rodzajPolaczeniaSieci, rejonySieci, MAGAZYNY_REJONU } from './siec-zasilania.js';
+import { ZASILANIE, jestOdbiornik, KONCOWE, rozwiaz, rodzajRek, polaczenia as polaczeniaSieci, zrodloRek as zrodloSieci, rodzajPolaczenia as rodzajPolaczeniaSieci, rejonySieci, MAGAZYNY_REJONU, usunElementSieci } from './siec-zasilania.js';
 
 const OBIEKTY = [
   { store: 'rozdzielnie', label: 'Rozdzielnia', title: 'nazwa_r', symbol: 'rozdzielnia' },
@@ -69,6 +69,8 @@ const RODZAJE = [
     zasilanyEtykieta: 'Zasilany z wyłącznika', uwaga: 'Kombajn zasilany z wyłącznika.' },
   { id: 'maszyny', store: 'maszyny', label: 'Maszyna (wiertnica, ładowarka, kolejka…)', krotko: 'Maszyna', nazwa: 'm_nazwa', przyklad: 'np. wiertnica WD-1', nap: NAP_URZ,
     zasilanyEtykieta: 'Zasilana z wyłącznika', uwaga: 'Maszyna jest urządzeniem końcowym — zasilana z wyłącznika; rodzaj i silniki dopiszesz w zakładce Maszyny.' },
+  { id: 'chodniki', store: 'chodniki', label: 'Chodnik (wyrobisko)', krotko: 'Chodnik', nazwa: 'ch_nazwa', przyklad: 'np. Chodnik 6',
+    zasilanyEtykieta: '', uwaga: 'Chodnik odchodzi od innego chodnika w podanym metrażu (albo jest pierwszym chodnikiem schematu). Kierunek: względem chodnika, od którego odchodzi, albo azymut (0° = północ, 90° = wschód).' },
   { id: 'przenosniki', store: 'przenosniki', label: 'Przenośnik / napęd', krotko: 'Przenośnik', nazwa: 'pr_nr', przyklad: 'np. 1.6',
     zasilanyEtykieta: 'Napęd zasilany z wyłącznika', uwaga: 'Napęd przenośnika zasilany z wyłącznika.' },
 ];
@@ -871,6 +873,7 @@ export function createPlanView(containerId, ustawienia = {}) {
         <div class="plan-pusty">
           <p><b>Plan rejonu jest pusty.</b> Plan rysuje się z zakładki Rejon → <b>Chodniki</b> (skąd chodnik wychodzi, w którą stronę i jak długi) oraz z położenia urządzeń w chodnikach (pola „Położenie na planie rejonu” w formularzach).</p>
           <p>Kolejność: 1) dodaj chodniki, 2) przy rozdzielniach, transformatorach, urządzeniach i KB wpisz chodnik i metraż (albo postaw je tu kliknięciem), 3) dodaj przenośniki, 4) uzupełnij kable w formularzach obiektów zasilanych.</p>
+          <button type="button" class="btn-primary" data-akcja="dodaj-chodnik">+ Dodaj pierwszy chodnik</button>
           <button type="button" class="btn-primary" data-akcja="przyklad">Wczytaj przykładowy rejon (AM-1), żeby zobaczyć, jak to działa</button>
         </div>`;
       return;
@@ -1489,8 +1492,109 @@ export function createPlanView(containerId, ustawienia = {}) {
 
   let wstepneDodawania = {};
 
+  // 06.11.2026 (Piotr): chodnik dodawany z planu — odchodzi od chodnika w metrażu, kierunek względem niego albo azymut
+  const KIERUNKI_CH = [['prosto', 'dalej prosto (jak chodnik macierzysty)', 0], ['prawo90', 'w prawo pod kątem 90°', 90], ['lewo90', 'w lewo pod kątem 90°', -90],
+    ['prawo45', 'skośnie w prawo 45°', 45], ['lewo45', 'skośnie w lewo 45°', -45], ['azymut', 'azymut — wpiszę stopnie', null]];
+  function pokazDodawanieChodnika(wstepne = {}) {
+    const ch = dane.chodniki || [];
+    const od = wstepne.odChodnika ?? (ch.length ? ch[ch.length - 1].id : '');
+    dodajEl.dataset.tryb = 'dodaj';
+    dodajEl.innerHTML = `
+      <h4>Dodaj chodnik</h4>
+      <div class="plan-dodaj-pola">
+        <label>Rodzaj
+          <select name="rodzaj">${RODZAJE.map((r) => `<option value="${r.id}" ${r.id === 'chodniki' ? 'selected' : ''}>${r.label}</option>`).join('')}</select>
+        </label>
+        <label>Nazwa chodnika
+          <input name="nazwa" required placeholder="np. Chodnik 6">
+        </label>
+        <label>Nr chodnika
+          <input name="ch_nr" placeholder="np. 6">
+        </label>
+        <label>Rodzaj chodnika
+          <select name="ch_rodzaj">${['', 'transportowy', 'odstawczy', 'dowierzchnia', 'przecinka', 'inny'].map((o) => `<option>${o}</option>`).join('')}</select>
+        </label>
+        <label>Odchodzi od chodnika
+          <select name="od">${opcjeSelect(ch.map((c) => ({ wartosc: String(c.id), opis: opisChodnika(c) })), '— pierwszy chodnik (początek schematu) —', String(od))}</select>
+        </label>
+        <label>W metrażu tamtego chodnika (m)
+          <input name="od_m" type="number" min="0" step="1" placeholder="puste = na jego końcu">
+        </label>
+        <label>Kierunek
+          <select name="kierunek">${KIERUNKI_CH.map(([k, o]) => `<option value="${k}" ${k === (ch.length ? 'prawo90' : 'azymut') ? 'selected' : ''}>${o}</option>`).join('')}</select>
+        </label>
+        <label>Azymut (°)
+          <input name="azymut" type="number" min="0" max="359" step="1" value="90">
+          <span class="field-hint" data-uwaga-kierunku></span>
+        </label>
+        <label>Długość (m)
+          <input name="dlugosc" type="number" min="1" step="1" required placeholder="np. 250">
+        </label>
+        <label>W drążeniu (przodek na końcu)
+          <select name="w_drazeniu"><option>nie</option><option>tak</option></select>
+        </label>
+        <label>Rejon (KB)
+          <select name="rejon"><option value="">— z urządzeń w chodniku —</option>${(dane.kb || []).map((k) => `<option value="${k.id}">${esc(k.kb_nazwa)}</option>`).join('')}</select>
+        </label>
+      </div>
+      <p class="plan-dodaj-uwaga">Chodnik w drążeniu ma na końcu strzałkę — to kierunek drążenia (przodek). Urządzenia postawisz potem kliknięciem przy chodniku albo z listy „Bez położenia na planie”.</p>
+      <div class="form-actions">
+        <button type="submit" class="btn-small btn-primary">Zapisz chodnik</button>
+        <button type="button" class="btn-small" data-akcja="anuluj-dodawanie">Anuluj</button>
+      </div>`;
+    dodajEl.classList.remove('hidden');
+    odswiezKierunek();
+    dodajEl.querySelector('[name="nazwa"]').focus();
+    dodajEl.scrollIntoView({ block: 'nearest' });
+  }
+  // azymut nowego chodnika: względem chodnika macierzystego albo wpisany
+  function azymutChodnika() {
+    const k = dodajEl.querySelector('[name="kierunek"]')?.value;
+    const od = (dane.chodniki || []).find((c) => String(c.id) === dodajEl.querySelector('[name="od"]')?.value);
+    const delta = (KIERUNKI_CH.find(([x]) => x === k) || [])[2];
+    if (od && delta !== null && delta !== undefined) return (((num(od.ch_azymut) ?? 90) + delta) % 360 + 360) % 360;
+    return ((num(dodajEl.querySelector('[name="azymut"]')?.value) ?? 90) % 360 + 360) % 360;
+  }
+  function odswiezKierunek() {
+    const az = dodajEl.querySelector('[name="azymut"]');
+    const od = dodajEl.querySelector('[name="od"]')?.value;
+    const k = dodajEl.querySelector('[name="kierunek"]');
+    if (!az || !k) return;
+    if (!od && k.value !== 'azymut') k.value = 'azymut';
+    const wpisany = k.value === 'azymut';
+    az.readOnly = !wpisany;
+    if (!wpisany) az.value = String(azymutChodnika());
+    const strona = ['północ', 'płn.-wsch.', 'wschód', 'płd.-wsch.', 'południe', 'płd.-zach.', 'zachód', 'płn.-zach.'][Math.round(Number(az.value || 0) / 45) % 8];
+    const uw = dodajEl.querySelector('[data-uwaga-kierunku]');
+    if (uw) uw.textContent = `${az.value}° — ${strona}${wpisany ? '' : ' (wyliczone z kierunku)'}`;
+  }
+  async function zapiszChodnik(f) {
+    const nazwa = String(f.get('nazwa') || '').trim();
+    if (!nazwa) return;
+    const od = String(f.get('od') || '');
+    const rejon = String(f.get('rejon') || '');
+    await nadzorAdd('chodniki', {
+      ch_nazwa: nazwa,
+      ch_nr: String(f.get('ch_nr') || '').trim(),
+      ch_rodzaj: String(f.get('ch_rodzaj') || ''),
+      ch_od_chodnika: od ? Number(od) : '',
+      ch_od_metraz: f.get('od_m') === '' || f.get('od_m') === null ? '' : Number(f.get('od_m')),
+      ch_azymut: azymutChodnika(),
+      ch_dlugosc: Number(f.get('dlugosc')) || 100,
+      ch_w_drazeniu: String(f.get('w_drazeniu') || 'nie'),
+      ...(rejon ? { rejon: Number(rejon) } : {}),
+      zrodlo_danych: 'ręcznie',
+    });
+    zamknijDodawanie();
+    widok.dopasowany = false;
+    recznie = false;
+    await wczytajDane();
+    render();
+  }
+
   function pokazDodawanie(rodzajId = 'wylacznik', wstepne = {}) {
     zamknijKarte();
+    if (rodzajId === 'chodniki') { wstepneDodawania = wstepne; pokazDodawanieChodnika(wstepne); return; }
     wstepneDodawania = wstepne;
     const rodzaj = rodzajDef(rodzajId) || rodzajDef('wylacznik');
     const jestPole = rodzaj.id === 'poleRozdzielcze';
@@ -1540,6 +1644,7 @@ export function createPlanView(containerId, ustawienia = {}) {
 
   async function zapiszDodawanie() {
     const f = new FormData(dodajEl);
+    if (f.get('rodzaj') === 'chodniki') { await zapiszChodnik(f); return; }
     const rodzaj = rodzajDef(f.get('rodzaj'));
     const nazwa = String(f.get('nazwa') || '').trim();
     if (!rodzaj || !nazwa) return;
@@ -1636,28 +1741,7 @@ export function createPlanView(containerId, ustawienia = {}) {
   }
 
   async function usunElement(store, id) {
-    const rec = (dane[store] || []).find((r) => r.id === id);
-    if (!rec) return;
-    const pola = store === 'rozdzielnie' ? (dane.poleRozdzielcze || []).filter((p) => rozwiaz(p.miejsce_zabudowy, dane.rozdzielnie || [], 'nazwa_r')?.id === id) : [];
-    const usuwane = [{ store, rec }, ...pola.map((p) => ({ store: 'poleRozdzielcze', rec: p }))];
-    const klucze = new Set(usuwane.map((d) => `${d.store}:${d.rec.id}`));
-    const odbiory = polaczenia().wynik.filter((p) => klucze.has(`${p.zrodlo.store}:${p.zrodlo.rec.id}`) && !klucze.has(`${p.cel.store}:${p.cel.rec.id}`));
-    const nazwyOdb = [...new Set(odbiory.map((p) => nazwaRek(p.cel.store, p.cel.rec)))];
-    const pytanie = `Usunąć ${opisRek(store, rec)}${pola.length ? ` razem z polami (${pola.length})` : ''}?`
-      + (nazwyOdb.length ? `\n\nZostaną bez zasilania: ${nazwyOdb.join(', ')}.` : '')
-      + '\n\nTego nie da się cofnąć (chyba że masz kopię — Eksport).';
-    if (!confirm(pytanie)) return;
-    for (const p of odbiory) {
-      const swiezy = (await nadzorGetAll(p.cel.store)).find((r) => r.id === p.cel.rec.id);
-      if (!swiezy) continue;
-      const nowy = { ...swiezy };
-      for (const [pole, zStore, zPole] of ZASILANIE[p.cel.store] || []) {
-        const z = rozwiaz(nowy[pole], dane[zStore] || [], zPole);
-        if (z && klucze.has(`${zStore}:${z.id}`)) nowy[pole] = '';
-      }
-      await nadzorUpdate(p.cel.store, nowy);
-    }
-    for (const d of usuwane) await nadzorDelete(d.store, d.rec.id);
+    if (!(await usunElementSieci(dane, store, id, opisRek))) return;
     zamknijKarte();
     await wczytajDane();
     render();
@@ -1672,7 +1756,8 @@ export function createPlanView(containerId, ustawienia = {}) {
       const [store, id] = String(dodajEl.dataset.cel).split(':');
       pokazZasilanie(store, Number(id), e.target.value === U_RODZAJE[1] ? 'odbiornik' : 'wylacznik');
     } else if (e.target.name === 'zrodlo') {
-      if (dodajEl.dataset.tryb === 'dodaj') odswiezNapiecie(dodajEl.querySelector('[name="rodzaj"]').value);
+      if (dodajEl.dataset.tryb === 'dodaj' && ['kierunek', 'od', 'azymut'].includes(e.target.name)) odswiezKierunek();
+      else if (dodajEl.dataset.tryb === 'dodaj' && dodajEl.querySelector('[name="rodzaj"]').value !== 'chodniki') odswiezNapiecie(dodajEl.querySelector('[name="rodzaj"]').value);
       else {
         const [store, id] = String(dodajEl.dataset.cel).split(':');
         odswiezNapiecie(dodajEl.dataset.rodzajUrz, (dane[store] || []).find((r) => r.id === Number(id)), dodajEl.dataset.obecneZrodlo);
@@ -1824,6 +1909,7 @@ export function createPlanView(containerId, ustawienia = {}) {
     else if (akcja === 'zamknij-karte') zamknijKarte();
     else if (akcja === 'anuluj-stawianie') zakonczStawianie();
     else if (akcja === 'dodaj-element') pokazDodawanie();
+    else if (akcja === 'dodaj-chodnik') pokazDodawanie('chodniki');
     else if (akcja === 'anuluj-dodawanie') zamknijDodawanie();
     else if (akcja === 'przyklad') {
       t.disabled = true;

@@ -6,7 +6,8 @@
 // Kafelek: klik = edycja rekordu w Bazie urządzeń; „+ dodaj” = nowy rekord zasilany z tego kafelka (formularz
 // z wpisanym źródłem); „na planie” = położenie na Planie rejonu.
 import { nadzorGetAll } from './db.js';
-import { polaczenia, rozwiaz, rodzajRek, rodzajPolaczenia, klucz } from './siec-zasilania.js';
+import { polaczenia, rozwiaz, rodzajRek, rodzajPolaczenia, klucz, usunElementSieci } from './siec-zasilania.js';
+import { nadzorDelete } from './db.js';
 
 const ROK_MS = 365 * 24 * 60 * 60 * 1000;
 const MAGAZYNY = ['rozdzielnie', 'poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb', 'maszyny', 'przenosniki', 'silniki', 'czujniki'];
@@ -59,7 +60,7 @@ const przelacznik = (kz, html) => {
   return `<button type="button" class="dash-zwin" data-zwin="${esc(kz)}" aria-expanded="${!zw}" title="${zw ? 'Rozwiń' : 'Zwiń'}">${zw ? '▸' : '▾'}</button>${zw ? `<span class="dash-licznik">${liczElementy(html)} el.</span>` : ''}`;
 };
 
-export async function renderDashboard(containerId, { onEditRecord, onShowOnPlan, onDodaj } = {}) {
+export async function renderDashboard(containerId, { onEditRecord, onShowOnPlan, onDodaj, onZmiana } = {}) {
   const container = document.getElementById(containerId);
   const listy = await Promise.all(MAGAZYNY.map((m) => nadzorGetAll(m)));
   const dane = Object.fromEntries(MAGAZYNY.map((m, i) => [m, listy[i]]));
@@ -120,6 +121,8 @@ export async function renderDashboard(containerId, { onEditRecord, onShowOnPlan,
           ${meta ? `<span class="dash-node-meta">${esc(meta)}</span>` : ''}
           ${stara ? '<span class="dash-node-flag">⚠ legalizacja &gt; 1 rok</span>' : ''}
           ${plus}
+          ${onEditRecord ? `<button type="button" class="dash-plan-btn dash-edytuj" data-edytuj="${store}:${rec.id}" title="Edytuj rekord">✎ edytuj</button>` : ''}
+          <button type="button" class="dash-plan-btn dash-usun" data-usun="${store}:${rec.id}" title="Usuń z bazy">usuń</button>
           ${NA_PLANIE.has(store) && onShowOnPlan ? `<button type="button" class="dash-plan-btn" data-plan="${store}:${rec.id}" title="Pokaż na Planie rejonu">na planie</button>` : ''}
         </div>
         ${dzieciHtml ? `<ul class="dash-children${czyZwiniety(kz) ? ' hidden' : ''}" data-dzieci="${esc(kz)}">${dzieciHtml}</ul>` : ''}
@@ -196,7 +199,26 @@ export async function renderDashboard(containerId, { onEditRecord, onShowOnPlan,
       if (tab) onDodaj(tab, { [pole]: Number(id), ...(stale || {}) });
     });
   });
-  container.querySelectorAll('.dash-plan-btn').forEach((b) => {
+  const nazwaKafelka = (st, r) => { const [rodz, n] = opisKafelka(st, r); return `${rodz.toLowerCase()} ${n || ''}`.trim(); };
+  container.querySelectorAll('[data-usun]').forEach((b) => b.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    const [store, id] = b.dataset.usun.split(':');
+    let usunieto;
+    if (store === 'silniki' || store === 'czujniki') {
+      const rec = dane[store].find((r) => r.id === Number(id));
+      usunieto = rec && confirm(`Usunąć ${nazwaKafelka(store, rec)} z bazy? Tego nie da się cofnąć.`);
+      if (usunieto) await nadzorDelete(store, Number(id));
+    } else {
+      usunieto = await usunElementSieci(dane, store, Number(id), nazwaKafelka);
+    }
+    if (usunieto) (onZmiana ? onZmiana() : renderDashboard(containerId, { onEditRecord, onShowOnPlan, onDodaj, onZmiana }));
+  }));
+  container.querySelectorAll('[data-edytuj]').forEach((b) => b.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const [store, id] = b.dataset.edytuj.split(':');
+    onEditRecord(store, Number(id));
+  }));
+  container.querySelectorAll('.dash-plan-btn[data-plan]').forEach((b) => {
     b.addEventListener('click', (event) => {
       event.stopPropagation();
       const [store, id] = b.dataset.plan.split(':');

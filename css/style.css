@@ -984,3 +984,6 @@ body.plan-pelny-body { overflow: hidden; }
 .dash-zwin:hover { background: #eceff1; }
 .dash-zwin-pusty { flex: 0 0 auto; display: inline-block; width: 1.6rem; margin-right: 0.35rem; }
 .dash-licznik { font-size: 0.75rem; color: #607d8b; margin-right: 0.4rem; white-space: nowrap; }
+.dash-plan-btn.dash-usun { color: #b71c1c; border-color: #e0a0a0; }
+.dash-plan-btn.dash-usun:hover { background: #fdecea; }
+.dash-plan-btn + .dash-plan-btn, .dash-dodaj + .dash-plan-btn { margin-left: 0.3rem; }

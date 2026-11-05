@@ -266,6 +266,7 @@ async function refreshActiveNadzorSub() {
         await editNadzorRecord(entityKey, id);
       },
       onShowOnPlan: (entityKey, id) => pokazNaPlanie(entityKey, id),
+      onZmiana: () => refreshActiveNadzorSub(),
       onDodaj: async (zakladka, preset) => {
         switchNadzorSub('crud');
         await nowyRekordNadzoru(zakladka, preset);
