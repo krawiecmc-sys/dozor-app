@@ -267,8 +267,46 @@ export function createPlanView(containerId, ustawienia = {}) {
       return r ? lokalizacja('rozdzielnie', r) : null;
     }
     const ch = rozwiaz(rec.lok_chodnik, dane.chodniki, 'ch_nazwa');
-    if (!ch || num(rec.lok_metraz) === null) return null;
+    if (!ch || num(rec.lok_metraz) === null) {
+      // 06.11.2026 (Piotr): wyłącznik bez wpisanego położenia stoi przy jedynym urządzeniu końcowym, które zasila
+      const cel = d < 6 && store === 'urzadzenia' && !jestOdbiornik(rec) ? jedynyOdbior(rec) : null;
+      const l = cel ? lokalizacja(cel.store, cel.rec, d + 1) : null;
+      return l ? { ...l, strona: l.strona === 'oś' ? 'prawa' : l.strona, przy: `${cel.store}:${cel.rec.id}`, samo: true } : null;
+    }
     return { ch: ch.id, m: num(rec.lok_metraz), strona: rec.lok_strona || 'lewa' };
+  }
+
+  // wyłącznik -> jedyne urządzenie końcowe, które zasila (odpływ); kilka odpływów = brak jednoznacznego miejsca
+  let odbCache = null;
+  let odbDane = null;
+  function jedynyOdbior(rec) {
+    if (odbDane !== dane) {
+      odbCache = new Map();
+      const licz = new Map();
+      for (const q of polaczenia().wynik) {
+        if (q.zrodlo.store !== 'urzadzenia' || q.prefiks === 'kabel_rez' || rodzajPolaczenia(q) !== 'odplyw') continue;
+        licz.set(q.zrodlo.rec.id, (licz.get(q.zrodlo.rec.id) || 0) + 1);
+        odbCache.set(q.zrodlo.rec.id, q.cel);
+      }
+      for (const [id, n] of licz) if (n > 1) odbCache.delete(id);
+      odbDane = dane;
+    }
+    return odbCache.get(rec.id) || null;
+  }
+
+  // wyłączniki stojące daleko (> 15 m albo w innym chodniku) od jedynego urządzenia, które zasilają
+  function wylacznikiDaleko() {
+    const wynik = [];
+    for (const rec of dane.urzadzenia || []) {
+      if (jestOdbiornik(rec) || przyObiekcie(rec) || ukryty('urzadzenia', rec)) continue;
+      const cel = jedynyOdbior(rec);
+      const a = lokalizacja('urzadzenia', rec);
+      const b = cel && lokalizacja(cel.store, cel.rec);
+      if (!a || !b || a.samo) continue;
+      const odl = a.ch === b.ch ? Math.abs(a.m - b.m) : null;
+      if (odl === null || odl > 15) wynik.push({ rec, cel, opis: odl === null ? 'w innym chodniku' : `${Math.round(odl)} m od niego` });
+    }
+    return wynik;
   }
 
   // początek schematu: pierwszy chodnik bez chodnika macierzystego
@@ -481,9 +519,13 @@ export function createPlanView(containerId, ustawienia = {}) {
   // Rodzaj połączenia (05.11.2026, Piotr): zasilanie (z przelotami) — linia ciągła, grubsza wg napięcia;
   // odpływ do urządzenia końcowego — przerywana; kabel rezerwowy — kreska-kropka.
   const rodzajPolaczenia = rodzajPolaczeniaSieci;
-  const grubWgNapiecia = (kV) => (kV >= 3 ? 2.8 : kV >= 0.9 ? 2.0 : 1.5);
+  // 06.11.2026 (Piotr: „linie zbyt blade”): grubsze linie, białe obrzeże oddziela kable biegnące obok siebie
+  const grubWgNapiecia = (kV) => (kV >= 3 ? 3.6 : kV >= 0.9 ? 3.0 : 2.6);
+  const ODSTEP_KABLI = 5.5; // px między pasami kabli wzdłuż chodnika
+  const PASY_KABLI = 8;
+  const PAS_KABLI_SZER = 4 + ODSTEP_KABLI * PASY_KABLI; // szerokość pęku kabli przy chodniku
   function stylKabla(rodzaj, kV) {
-    if (rodzaj === 'odplyw') return { grub: 1.3, kreski: ' stroke-dasharray="6 3.5"' };
+    if (rodzaj === 'odplyw') return { grub: 2.2, kreski: ' stroke-dasharray="7 4"' };
     if (rodzaj === 'rezerwowe') return { grub: grubWgNapiecia(kV) - 0.4, kreski: ' stroke-dasharray="10 3 2 3"' };
     return { grub: grubWgNapiecia(kV), kreski: '' };
   }
@@ -526,10 +568,11 @@ export function createPlanView(containerId, ustawienia = {}) {
     const zajete = []; // prostokąty opisów i symboli — proste unikanie nachodzenia
     const poz = {};
 
+    const drobne = (opcje.k ?? 1) >= 0.6; // dane urządzeń i opisy kabli tylko, gdy da się je przeczytać
     const zajmij = (x1, y1, x2, y2) => zajete.push({ x1, y1, x2, y2 });
     const koliduje = (b) => zajete.some((z) => b.x1 < z.x2 && b.x2 > z.x1 && b.y1 < z.y2 && b.y2 > z.y1);
-    function opis(x, y, tekst, { rx = 13, ry = 13, rozmiar = Math.round(9 + 3 * sk()), kolor = KOLOR.tekst, grupa = 'opisy', wazny = false } = {}) {
-      if (!tekst) return;
+    function opis(x, y, tekst, { rx = 13, ry = 13, rozmiar = Math.round(9 + 3 * sk()), kolor = KOLOR.tekst, grupa = 'opisy', wazny = false, tylkoWolne = false } = {}) {
+      if (!tekst) return null;
       const w = tekst.length * rozmiar * 0.56;
       const h = rozmiar + 2;
       const kandydaci = [
@@ -544,7 +587,8 @@ export function createPlanView(containerId, ustawienia = {}) {
         const x1 = k.a === 'start' ? k.x : k.a === 'end' ? k.x - w : k.x - w / 2;
         return { x1, y1: k.y - rozmiar, x2: x1 + w, y2: k.y - rozmiar + h };
       };
-      const wybrany = kandydaci.find((k) => !koliduje(pudlo(k))) || kandydaci[0];
+      const wybrany = kandydaci.find((k) => !koliduje(pudlo(k))) || (tylkoWolne ? null : kandydaci[0]);
+      if (!wybrany) return null;
       const b = pudlo(wybrany);
       zajmij(b.x1, b.y1, b.x2, b.y2);
       czesci[grupa].push(`<text x="${wybrany.x.toFixed(1)}" y="${wybrany.y.toFixed(1)}" text-anchor="${wybrany.a}" font-size="${rozmiar}" font-family="Arial, sans-serif" fill="${kolor}"${wazny ? ' font-weight="bold"' : ''} paint-order="stroke" stroke="#ffffff" stroke-width="3" stroke-linejoin="round">${esc(tekst)}</text>`);
@@ -612,10 +656,11 @@ export function createPlanView(containerId, ustawienia = {}) {
         let x;
         let y;
         if (znak === 0) {
-          x = p.x + g.dx * 30 * sk() * k;
-          y = p.y + g.dy * 30 * sk() * k;
+          x = p.x + g.dx * 44 * sk() * k;
+          y = p.y + g.dy * 44 * sk() * k;
         } else {
-          const odl = pasChodnika / 2 + 30 * sk() + 6 + 32 * sk() * k;
+          // po stronie kabli (lewa) — za pękiem kabli; po prawej — bliżej; kolejne w tym samym metrażu dalej od chodnika
+          const odl = pasChodnika / 2 + (znak < 0 ? PAS_KABLI_SZER + 10 : 14) + 18 * sk() + 46 * sk() * k;
           x = p.x + znak * g.nx * odl;
           y = p.y + znak * g.ny * odl;
         }
@@ -684,9 +729,9 @@ export function createPlanView(containerId, ustawienia = {}) {
       const napKabla = napiecieKabla(p);
       const kolor = kolorNapiecia(napKabla);
       const styl = stylKabla(rodzajPolaczenia(p), napKabla);
-      const grubKabla = styl.grub + 1 * sk();
+      const grubKabla = styl.grub + 0.6 * sk();
       const kreski = styl.kreski;
-      const odsun = -(pasChodnika / 2 + 3 + 3.5 * (pas % 7));
+      const odsun = -(pasChodnika / 2 + 4 + ODSTEP_KABLI * (pas % PASY_KABLI));
       pas += 1;
       let punkty = [{ x: a.x, y: a.y }];
       if (SCHEMAT) {
@@ -710,7 +755,8 @@ export function createPlanView(containerId, ustawienia = {}) {
       punkty = punkty.filter((q, i) => i === 0 || Math.hypot(q.x - punkty[i - 1].x, q.y - punkty[i - 1].y) > 0.5);
       const idKabla = `${p.cel.store}:${p.cel.rec.id}:${p.prefiks}`;
       const blade = a.obcy || b.obcy ? ' opacity="0.35"' : '';
-      czesci.kable.push(`<polyline points="${punkty.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(' ')}" fill="none" stroke="${kolor}" stroke-width="${grubKabla.toFixed(1)}"${kreski}${blade} stroke-linejoin="round"/><polyline points="${punkty.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(' ')}" fill="none" stroke="transparent" stroke-width="12" data-kabel="${esc(idKabla)}" class="plan-klik"/>`);
+      const pkt = punkty.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(' ');
+      czesci.kable.push(`<polyline points="${pkt}" fill="none" stroke="#ffffff" stroke-width="${(grubKabla + 2.2).toFixed(1)}"${blade} stroke-linejoin="round" stroke-linecap="round"/><polyline points="${pkt}" fill="none" stroke="${kolor}" stroke-width="${grubKabla.toFixed(1)}"${kreski}${blade} stroke-linejoin="round"/><polyline points="${punkty.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(' ')}" fill="none" stroke="transparent" stroke-width="12" data-kabel="${esc(idKabla)}" class="plan-klik"/>`);
       if (!SCHEMAT && (warstwy.napiecieKabli || warstwy.opisyKabli)) {
         let naj = 0;
         let s = [punkty[0], punkty[1] || punkty[0]];
@@ -718,10 +764,14 @@ export function createPlanView(containerId, ustawienia = {}) {
           const d = Math.hypot(punkty[i].x - punkty[i - 1].x, punkty[i].y - punkty[i - 1].y);
           if (d > naj) { naj = d; s = [punkty[i - 1], punkty[i]]; }
         }
+        // 06.11.2026: opis na własnym odcinku kabla (ostatni, dochodzący do zasilanego urządzenia), nie na wspólnym pęku
+        const n = punkty.length;
+        if (!SCHEMAT && n >= 2 && Math.hypot(punkty[n - 1].x - punkty[n - 2].x, punkty[n - 1].y - punkty[n - 2].y) >= 18) s = [punkty[n - 2], punkty[n - 1]];
         // 03.11.2026: dwie warstwy — znacznik napięcia i opis kabla (nr, typ, przekrój, długość), każdą można wyłączyć
         const tekst = [warstwy.napiecieKabli ? znacznikNapiecia(napKabla) : '', warstwy.opisyKabli && maOpisKabla(p.cel.rec, p.prefiks) ? opisKabla(p.cel.rec, p.prefiks) : '']
           .filter(Boolean).join(' · ');
-        if (tekst) opisyKabli.push([(s[0].x + s[1].x) / 2, (s[0].y + s[1].y) / 2, tekst, { rx: 2, ry: 4, rozmiar: Math.round(8 + 2 * sk()), kolor, grupa: 'kable' }]);
+        // kilka miejsc wzdłuż własnego odcinka; opis, który się nigdzie nie mieści, pomijany (jest na karcie kabla)
+        if (tekst && drobne) opisyKabli.push({ miejsca: [0.5, 0.3, 0.7].map((t) => [s[0].x + (s[1].x - s[0].x) * t, s[0].y + (s[1].y - s[0].y) * t]), tekst, o: { rx: 2, ry: 4, rozmiar: Math.round(8 + 2 * sk()), kolor, grupa: 'kable', tylkoWolne: true } });
       }
       kable.push({ ...p, narysowany: true, id: idKabla });
     }
@@ -746,18 +796,23 @@ export function createPlanView(containerId, ustawienia = {}) {
         const ok = kab && warstwy.opisyKabli && maOpisKabla(rec, 'kabel') ? `kabel ${opisKabla(rec, 'kabel')}` : '';
         const dan = warstwy.daneObiektow ? daneObiektu(def.store, rec) : '';
         podpis(pol, [dan, nap && !dan.includes(nap) ? nap : '', ok].filter(Boolean).join(' · '));
-      } else if (warstwy.daneObiektow) podpis(pol, daneObiektu(def.store, rec));
+      } else if (warstwy.daneObiektow && drobne) podpis(pol, daneObiektu(def.store, rec));
     }
-
-    for (const args of opisyKabli) opis(...args);
 
     // nazwy chodników
     if (warstwy.chodniki && !SCHEMAT) {
       for (const g of geo.values()) {
         if (ukryty('chodniki', g.rec)) continue;
-        const srodek = naEkran({ x: g.x0 + (g.dx * g.len) / 2, y: g.y0 + (g.dy * g.len) / 2 }, v);
-        opis(srodek.x, srodek.y, opisChodnika(g.rec) + (g.brakDanych ? ' ⚠' : ''), { rx: 10 * sk(), ry: 12 * sk(), rozmiar: Math.round(8.5 + 2.5 * sk()), kolor: KOLOR.tekstChodnika });
+        // 06.11.2026: nazwa w pierwszym wolnym miejscu wzdłuż chodnika (środek, potem bliżej końców)
+        const tekstCh = opisChodnika(g.rec) + (g.brakDanych ? ' ⚠' : '');
+        const oCh = { rx: 10 * sk(), ry: 12 * sk(), rozmiar: Math.round(8.5 + 2.5 * sk()), kolor: KOLOR.tekstChodnika };
+        const miejscaCh = [0.5, 0.35, 0.65, 0.2, 0.8].map((t) => naEkran({ x: g.x0 + g.dx * g.len * t, y: g.y0 + g.dy * g.len * t }, v));
+        if (!miejscaCh.some((q) => opis(q.x, q.y, tekstCh, { ...oCh, tylkoWolne: true }))) opis(miejscaCh[0].x, miejscaCh[0].y, tekstCh, oCh);
       }
+    }
+
+    for (const { miejsca, tekst, o } of opisyKabli) {
+      for (const [mx, my] of miejsca) if (opis(mx, my, tekst, o)) break;
     }
 
     const svg = `
@@ -782,7 +837,20 @@ export function createPlanView(containerId, ustawienia = {}) {
     sel.innerHTML = ['wszystkie', ...lista].map((o) => `<option ${o === mojRejon ? 'selected' : ''}>${esc(o)}</option>`).join('');
   }
 
-  const skalaPowiekszenia = () => (widok.sFit ? Math.max(0.05, Math.min(40, widok.s / widok.sFit)) : 1);
+  // 06.11.2026 (Piotr: „odpowiednie odległości urządzeń, opisów i linii”): plan rozkładany w stałej skali terenu
+  // (co najmniej BAZA_PX_M px na metr), a dopasowanie / przybliżenie skaluje całość — po przybliżeniu urządzenia stoją
+  // we właściwych odstępach; przy dużym pomniejszeniu drobne opisy chowają się (zostają nazwy).
+  // Przy przybliżaniu symbole i napisy rosną wolniej niż odległości (z^0,7) — jak w mapie: więcej miejsca między
+  // urządzeniami, ukryte opisy kabli pojawiają się kolejno. Przy „Dopasuj” symbole nie mniejsze niż 65% normalnych.
+  const BAZA_PX_M = 2.4;
+  const MIN_SYMBOLI_PRZY_DOPASOWANIU = 0.65;
+  function skalaPowiekszenia() {
+    if (!widok.sFit) return 1;
+    const zoomW = Math.max(0.02, Math.min(40, widok.s / widok.sFit));
+    if (SCHEMAT) return zoomW;
+    const kFit = Math.min(1, Math.max(MIN_SYMBOLI_PRZY_DOPASOWANIU, widok.sFit / BAZA_PX_M));
+    return Math.max(0.05, Math.min(6, kFit * zoomW ** 0.7));
+  }
 
   function render() {
     odswiezWyborRejonu();
@@ -827,7 +895,7 @@ export function createPlanView(containerId, ustawienia = {}) {
     // 05.11.2026 (Piotr): powiększenie skaluje proporcjonalnie długości i wielkość elementów (symbole, linie, napisy):
     // rysunek powstaje w skali dopasowania, a przybliżenie to jedno skalowanie całości (k)
     const k = skalaPowiekszenia();
-    const w = rysuj({ s: widok.s / k, tx: widok.tx / k, ty: widok.ty / k }, { szer: szer / k, wys: wys / k });
+    const w = rysuj({ s: widok.s / k, tx: widok.tx / k, ty: widok.ty / k }, { szer: szer / k, wys: wys / k, k });
     pozycje = Object.fromEntries(Object.entries(w.poz).map(([kl, q]) => [kl, { ...q, x: q.x * k, y: q.y * k }]));
     svgEl.setAttribute('width', szer);
     svgEl.setAttribute('height', wys);
@@ -858,10 +926,10 @@ export function createPlanView(containerId, ustawienia = {}) {
       ${pozycja('urzadzenie', 'Wyłącznik / szafa stycznikowa / zespół', [1, 1])}
       ${pozycja('naped', 'Urządzenie końcowe (silnik M, pompa, napęd)')}
       ${pozycja('kombajn', 'Kombajn / KB')}
-      ${kabel(KOLOR.sn, 'Zasilanie 6 kV', '', 2.8)}
-      ${kabel(KOLOR.nn1, 'Zasilanie 1 kV', '', 2.0)}
-      ${kabel(KOLOR.nn05, 'Zasilanie 0,5 kV', '', 1.5)}
-      ${kabel(KOLOR.nn1, 'Odpływ do urządzenia końcowego', ' stroke-dasharray="6 3.5"', 1.3)}
+      ${kabel(KOLOR.sn, 'Zasilanie 6 kV', '', 3.6)}
+      ${kabel(KOLOR.nn1, 'Zasilanie 1 kV', '', 3.0)}
+      ${kabel(KOLOR.nn05, 'Zasilanie 0,5 kV', '', 2.6)}
+      ${kabel(KOLOR.nn1, 'Odpływ do urządzenia końcowego', ' stroke-dasharray="7 4"', 2.2)}
       ${kabel(KOLOR.obrys, 'Kabel rezerwowy', ' stroke-dasharray="10 3 2 3"')}
       ${SCHEMAT ? '' : `<span class="plan-leg"><svg width="34" height="10"><line x1="0" y1="5" x2="34" y2="5" stroke="${KOLOR.przenosnik}" stroke-width="4"/><line x1="0" y1="5" x2="34" y2="5" stroke="#fff" stroke-width="1.8" stroke-dasharray="1.5 6"/></svg>Przenośnik</span>
       <span class="plan-leg"><svg width="34" height="10"><line x1="0" y1="5" x2="26" y2="5" stroke="${KOLOR.drazenie}" stroke-width="2.5"/><path d="M24,1 L33,5 L24,9 z" fill="${KOLOR.drazenie}"/></svg>Kierunek drążenia</span>`}
@@ -915,6 +983,11 @@ export function createPlanView(containerId, ustawienia = {}) {
     const blok = (tytul, lista) => (lista.length ? `<details class="plan-brak" ${lista.length <= 6 ? 'open' : ''}><summary>${tytul} (${lista.length})</summary><ul>${lista.join('')}</ul></details>` : '');
 
     brakiEl.innerHTML = [
+      blok('Wyłączniki daleko od zasilanego urządzenia (> 15 m albo inny chodnik)', (() => {
+        const lista = wylacznikiDaleko();
+        return lista.map(({ rec, cel, opis: o }) => `<li>${esc(nazwa('urzadzenia', rec))} → ${esc(opisObiektu(cel.store, cel.rec))}: ${esc(o)} <button type="button" class="btn-small" data-przy-cel="${rec.id}|${cel.store}:${cel.rec.id}">Postaw przy nim</button></li>`)
+          .concat(lista.length > 1 ? [`<li><button type="button" class="btn-small btn-primary" data-przy-wszystkie="1">Postaw wszystkie (${lista.length}) przy zasilanych urządzeniach</button></li>`] : []);
+      })()),
       blok('Bez położenia na planie', bezPolozenia.map(({ def, rec }) => `<li>${esc(nazwa(def.store, rec))} <button type="button" class="btn-small" data-postaw="${def.store}:${rec.id}">Postaw na planie</button> <button type="button" class="btn-small" data-edytuj="${def.store}:${rec.id}">Edytuj</button></li>`)),
       blok('Przenośniki bez chodnika', przenBez.map((rec) => `<li>${esc(nazwa('przenosniki', rec))} <button type="button" class="btn-small" data-edytuj="przenosniki:${rec.id}">Edytuj</button></li>`)),
       blok('Połączenia bez opisu kabla', bezKabla.map((k) => `<li>${esc(nazwa(k.zrodlo.store, k.zrodlo.rec))} → ${esc(nazwa(k.cel.store, k.cel.rec))}${k.prefiks === 'kabel_rez' ? ' (rezerwowe)' : ''} <button type="button" class="btn-small" data-edytuj="${k.cel.store}:${k.cel.rec.id}">Uzupełnij kabel</button></li>`)),
@@ -1781,6 +1854,20 @@ export function createPlanView(containerId, ustawienia = {}) {
       const [store, id] = t.dataset.edytuj.split(':');
       onEditRecord(store, Number(id));
     }
+    if (t.dataset.przyCel || t.dataset.przyWszystkie) {
+      const lista = t.dataset.przyCel
+        ? [{ id: Number(t.dataset.przyCel.split('|')[0]), przy: t.dataset.przyCel.split('|')[1] }]
+        : wylacznikiDaleko().map(({ rec, cel }) => ({ id: rec.id, przy: `${cel.store}:${cel.rec.id}` }));
+      if (t.dataset.przyWszystkie && !confirm(`Ustawić ${lista.length} wyłączników przy urządzeniach, które zasilają? Wpisane metraże zostaną zastąpione umiejscowieniem „stoi przy” (cofniesz to przyciskiem Umiejscowienie…).`)) return;
+      const wszystkie = await nadzorGetAll('urzadzenia');
+      for (const { id, przy } of lista) {
+        const r = wszystkie.find((x) => x.id === id);
+        if (r) await nadzorUpdate('urzadzenia', { ...r, lok_przy: przy, lok_strona: 'prawa', plan_dx: 0, plan_dy: 0 });
+      }
+      await wczytajDane();
+      render();
+      return;
+    }
     if (t.dataset.umiejscowienie) {
       const [store, id] = t.dataset.umiejscowienie.split(':');
       pokazUmiejscowienie(store, Number(id));
@@ -2002,5 +2089,5 @@ export function createPlanView(containerId, ustawienia = {}) {
     return true;
   }
 
-  return { init, pokaz, _test: { problemySilnikow, problemNapiecia, ukladSchematu, tryb, rejony, obcyRejon, ustawRejon: (r, pokazInne = true) => { mojRejon = r; warstwy.inneOddzialy = pokazInne; }, oddzialRek, ustawOddzial: (o, pokazInne = true) => { mojOddzial = o; warstwy.inneOddzialy = pokazInne; }, opisChodnika, opcjePrzy, pozycje: () => rysuj(widok, { szer: 1000, wys: 700 }).poz, problemTypu, napieciaDoWyboru, katalog: () => katalog, zrodlaDla, odplywyDla, zgodnePolaczenie, problemyPolaczenia, rodzajPolaczenia, opcjeNapieciaFormularza, napiecieEfektywne, kilkaOdplywow, polaczenia: () => polaczenia().wynik, wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
+  return { init, pokaz, _test: { jedynyOdbior, wylacznikiDaleko, problemySilnikow, problemNapiecia, ukladSchematu, tryb, rejony, obcyRejon, ustawRejon: (r, pokazInne = true) => { mojRejon = r; warstwy.inneOddzialy = pokazInne; }, oddzialRek, ustawOddzial: (o, pokazInne = true) => { mojOddzial = o; warstwy.inneOddzialy = pokazInne; }, opisChodnika, opcjePrzy, pozycje: () => rysuj(widok, { szer: 1000, wys: 700 }).poz, problemTypu, napieciaDoWyboru, katalog: () => katalog, zrodlaDla, odplywyDla, zgodnePolaczenie, problemyPolaczenia, rodzajPolaczenia, opcjeNapieciaFormularza, napiecieEfektywne, kilkaOdplywow, polaczenia: () => polaczenia().wynik, wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
 }

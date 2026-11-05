@@ -14,9 +14,9 @@ function rozwiaz(wartosc, rekordy, pole) {
 export const KOLOR = {
   obrys: '#263238',
   aparat: '#eceff1',
-  sn: '#c62828', // SN (3–30 kV, w rejonie zwykle 6 kV)
-  nn1: '#ef6c00', // nn 1 kV (1000 V) — pomarańczowy
-  nn05: '#c49a00', // nn 0,5 kV (do 0,69 kV: 500 V, 400 V) — ciemnożółty
+  sn: '#d50000', // SN (3–30 kV, w rejonie zwykle 6 kV) — czerwony (06.11.2026: mocniejsze kolory, Piotr: „zbyt blade”)
+  nn1: '#ff6d00', // nn 1 kV (1000 V) — pomarańczowy
+  nn05: '#d9a400', // nn 0,5 kV (do 0,69 kV: 500 V, 400 V) — ciemnożółty
   przenosnik: '#455a64',
   drazenie: '#6a1b9a', // fiolet — nie myli się z kablem 1 kV
   chodnik: '#e3e7ea',

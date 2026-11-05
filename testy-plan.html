@@ -56,9 +56,9 @@ try {
   ok(kable === 16, `16 kabli (2 SN + 14 nn) narysowanych (jest ${kable})`);
   const teksty = [...svg.querySelectorAll('text')].map((t) => t.textContent);
   ok(teksty.includes('Mifama1100 1.5') && teksty.includes('R-650') && teksty.includes('AM-1'), 'opisy: Mifama1100 1.5, R-650, AM-1');
-  ok(teksty.some((t) => t === '6 kV · K2 3x50 690 m'), 'opis kabla: znacznik napięcia + K2 3x50 690 m');
+  ok(teksty.some((t) => / kV · K\d+ \d+x\d+ \d+ m$/.test(t)), 'opis kabla: znacznik napięcia + nr, przekrój, długość');
   const zOpisem = teksty.filter((t) => / kV · K\d+ /.test(t)).length;
-  ok(zOpisem === 13, `13 kabli ze znacznikiem napięcia i opisem, 3 bez opisu (jest ${zOpisem})`);
+  ok(zOpisem >= 6 && zOpisem <= 13, `opisy kabli tylko tam, gdzie się mieszczą (${zOpisem} z 13; reszta po przybliżeniu i na karcie kabla)`);
   const braki = document.getElementById('plan-braki').textContent;
   ok(braki.includes('Bez położenia na planie (1)') && braki.includes('Połączenia bez opisu kabla (3)'), 'lista braków: 1 bez położenia (STARY-T9), 3 bez kabla');
   // 2b) Układ zasilania (03.11.2026): pole -> trafo / pole, trafo -> wyłącznik, wyłącznik -> odbiorniki
@@ -225,7 +225,7 @@ try {
   // 8) Reguły Piotra 05.11.2026: kolory napięć, trafo dwunapięciowe, strona pierwotna (zasilanie + 1 przelot), odpływ przerywany
   const SYM = await import('./js/symbole.js');
   const { U_RODZAJE: U_RODZ } = await import('./js/nadzor-entities.js');
-  ok(SYM.kolorNapiecia(6) === '#c62828' && SYM.kolorNapiecia(1) === '#ef6c00' && SYM.kolorNapiecia(0.5) === '#c49a00', 'kolory: 6 kV czerwony, 1 kV pomarańczowy, 0,5 kV ciemnożółty');
+  ok(SYM.kolorNapiecia(6) === '#d50000' && SYM.kolorNapiecia(1) === '#ff6d00' && SYM.kolorNapiecia(0.5) === '#d9a400', 'kolory: 6 kV czerwony, 1 kV pomarańczowy, 0,5 kV ciemnożółty');
   ok(JSON.stringify(SYM.napieciaWtorne({ t_napiecie: '6/0,5/1 kV' })) === '[0.5,1]' && JSON.stringify(SYM.napieciaWtorne({ t_napiecie: '6/1 kV' })) === '[1]' && JSON.stringify(SYM.napieciaWtorne({ t_napiecie: '6/1,2 kV' })) === '[1]' && JSON.stringify(SYM.napieciaWtorne({ t_napiecie: '6/0,525/1,2 kV' })) === '[0.5,1]' && SYM.rowneKV(1.2, 1), 'strony wtórne: 6/0,5/1 kV -> 0,5 i 1; 1,2 kV -> sieć 1 kV, 0,525 kV -> sieć 0,5 kV');
   const pole8 = (await db.nadzorGetAll('poleRozdzielcze')).find((r) => r.p_nazwa === 'R-650 pole 1');
   const t1_8 = (await db.nadzorGetAll('transformatory')).find((r) => r.t_nr === 'It3sb 340');
@@ -320,6 +320,19 @@ try {
   ok(!Object.values(poz12b).some((p) => p.rec?.nazwa_r === 'R-OBCA'), 'rozdzielnia bez odbiorów w rejonie nie jest rysowana');
   ok([...svg.querySelectorAll('text')].some((x) => x.textContent === 'R-ZDALNA (poza rejonem)'), 'opis: R-ZDALNA (poza rejonem)');
   ok(!svg.innerHTML.includes('NaN'), 'brak NaN po rozdzielni poza rejonem');
+  // 12b) Wyłącznik jak najbliżej zasilanego urządzenia (06.11.2026)
+  const WS = await db.nadzorAdd('urzadzenia', { nazwa: 'W-samo', u_rodzaj: U_RODZ[0], nap_zas: '1 kV', zasilane_z_transformatora: TZ });
+  await db.nadzorAdd('urzadzenia', { nazwa: 'P-samo', u_rodzaj: U_RODZ[1], nap_zas: '1 kV', zasilane_z_urzadzenia: WS, lok_chodnik: chod.id, lok_metraz: 200, lok_strona: 'oś' });
+  const WD = await db.nadzorAdd('urzadzenia', { nazwa: 'W-daleko', u_rodzaj: U_RODZ[0], nap_zas: '1 kV', zasilane_z_transformatora: TZ, lok_chodnik: chod.id, lok_metraz: 20, lok_strona: 'lewa' });
+  const PD = await db.nadzorAdd('urzadzenia', { nazwa: 'P-daleko', u_rodzaj: U_RODZ[1], nap_zas: '1 kV', zasilane_z_urzadzenia: WD, lok_chodnik: chod.id, lok_metraz: 180, lok_strona: 'lewa' });
+  await plan.init({});
+  const pzS = T.pozycje();
+  ok(pzS[`urzadzenia:${WS}`]?.lok.samo && pzS[`urzadzenia:${WS}`].lok.m === 200, 'wyłącznik bez położenia stoi przy jedynym urządzeniu, które zasila');
+  ok(T.wylacznikiDaleko().some((x) => x.rec.id === WD && x.opis === '160 m od niego'), 'lista: wyłącznik 160 m od zasilanego urządzenia');
+  document.querySelector(`#plan-braki [data-przy-cel^="${WD}|"]`)?.click();
+  await new Promise((r) => setTimeout(r, 300));
+  const wdRec = (await db.nadzorGetAll('urzadzenia')).find((r) => r.id === WD);
+  ok(wdRec.lok_przy === `urzadzenia:${PD}` && !T.wylacznikiDaleko().some((x) => x.rec.id === WD), '„Postaw przy nim”: wyłącznik stoi przy zasilanym urządzeniu');
   // 13) Rejon = KB z sieci zasilania (05.11.2026)
   const U_RODZAJE = U_RODZ;
   const RR = await db.nadzorAdd('rozdzielnie', { nazwa_r: 'R-REJ', r_napiecie: '6 kV' });
@@ -365,7 +378,7 @@ try {
   ok(kG('kb', kbAM9.id) && kG('kb', kbAM9.id).y > kG('urzadzenia', WA).y, 'KB pod swoim wyłącznikiem');
   ok(kG('urzadzenia', WA).y > kG('urzadzenia', PA).y && kG('kb', kbAM9.id).y > kG('urzadzenia', PA).y, 'KB na końcu rejonu — gałąź z KB ostatnia pod swoim transformatorem');
   const svgG = document.querySelector('#graf-content svg');
-  ok(svgG.querySelectorAll('[data-kabel]').length >= 8 && !svgG.innerHTML.includes('NaN') && svgG.innerHTML.includes('stroke-dasharray="6 3.5"'), 'kable w grafie z regułami planu (odpływ przerywany), bez NaN');
+  ok(svgG.querySelectorAll('[data-kabel]').length >= 8 && !svgG.innerHTML.includes('NaN') && svgG.innerHTML.includes('stroke-dasharray="7 4"'), 'kable w grafie z regułami planu (odpływ przerywany), bez NaN');
   ok([...svgG.querySelectorAll('text')].some((t) => t.textContent.startsWith('1 kV')), 'opis pod nazwą: napięcie zasilania (zamiast napisów na liniach)');
   ok(G.polaczenia().length === T.polaczenia().length, `graf i plan mają te same połączenia (${G.polaczenia().length})`);
   G.ustawRejon('AM-8', false);
