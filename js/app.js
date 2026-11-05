@@ -344,6 +344,10 @@ async function pokazWMapie(entityKey, id) {
   await refreshActiveNadzorSub();
   const el = document.querySelector(`#dashboard-container .dash-node-row[data-entity="${entityKey}"][data-id="${id}"]`);
   if (!el) return;
+  // rozwiń zwinięte lamele nad elementem (rozdzielnia, pole, transformator…)
+  for (let ul = el.closest('.dash-children'); ul; ul = ul.parentElement?.closest('.dash-children')) {
+    if (ul.classList.contains('hidden')) ul.parentElement.querySelector(':scope > .dash-node-row .dash-zwin')?.click();
+  }
   document.querySelectorAll('.dash-wskaz').forEach((x) => x.classList.remove('dash-wskaz'));
   el.classList.add('dash-wskaz');
   el.scrollIntoView({ block: 'center' });

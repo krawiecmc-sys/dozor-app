@@ -45,6 +45,20 @@ function opisKafelka(store, rec) {
   }
 }
 
+// 06.11.2026 (Piotr): lamele rozwijane do wysokości poszczególnych rozdzielni — rozdzielnie i grupy „niepowiązane”
+// domyślnie zwinięte (widać liczbę elementów), niższe poziomy domyślnie rozwinięte; stan zapamiętany w przeglądarce
+const KLUCZ_ZWIN = 'protektor-mapa-zwiniecie';
+let zwiniecie = {};
+try { zwiniecie = JSON.parse(localStorage.getItem(KLUCZ_ZWIN) || '{}'); } catch { zwiniecie = {}; }
+const zapiszZwiniecie = () => { try { localStorage.setItem(KLUCZ_ZWIN, JSON.stringify(zwiniecie)); } catch {} };
+const domyslnieZwiniety = (kz) => kz.startsWith('rozdzielnie:') || kz.startsWith('grupa:');
+const czyZwiniety = (kz) => (kz in zwiniecie ? zwiniecie[kz] : domyslnieZwiniety(kz));
+const liczElementy = (html) => (html.match(/class="dash-node"/g) || []).length;
+const przelacznik = (kz, html) => {
+  const zw = czyZwiniety(kz);
+  return `<button type="button" class="dash-zwin" data-zwin="${esc(kz)}" aria-expanded="${!zw}" title="${zw ? 'Rozwiń' : 'Zwiń'}">${zw ? '▸' : '▾'}</button>${zw ? `<span class="dash-licznik">${liczElementy(html)} el.</span>` : ''}`;
+};
+
 export async function renderDashboard(containerId, { onEditRecord, onShowOnPlan, onDodaj } = {}) {
   const container = document.getElementById(containerId);
   const listy = await Promise.all(MAGAZYNY.map((m) => nadzorGetAll(m)));
@@ -101,13 +115,14 @@ export async function renderDashboard(containerId, { onEditRecord, onShowOnPlan,
     return `
       <li class="dash-node">
         <div class="dash-node-row ${stara ? 'expired' : ''} dash-clickable" data-entity="${store}" data-id="${rec.id}" tabindex="0">
+          ${dzieciHtml ? przelacznik(kz, dzieciHtml) : '<span class="dash-zwin-pusty"></span>'}
           <span class="dash-node-label"><span class="dash-rodzaj">${esc(rodzaj)}</span> ${esc(nazwa || '(bez nazwy)')}${dopisek ? ` <i>(${esc(dopisek)})</i>` : ''}</span>
           ${meta ? `<span class="dash-node-meta">${esc(meta)}</span>` : ''}
           ${stara ? '<span class="dash-node-flag">⚠ legalizacja &gt; 1 rok</span>' : ''}
           ${plus}
           ${NA_PLANIE.has(store) && onShowOnPlan ? `<button type="button" class="dash-plan-btn" data-plan="${store}:${rec.id}" title="Pokaż na Planie rejonu">na planie</button>` : ''}
         </div>
-        ${dzieciHtml ? `<ul class="dash-children">${dzieciHtml}</ul>` : ''}
+        ${dzieciHtml ? `<ul class="dash-children${czyZwiniety(kz) ? ' hidden' : ''}" data-dzieci="${esc(kz)}">${dzieciHtml}</ul>` : ''}
       </li>`;
   }
 
@@ -125,12 +140,16 @@ export async function renderDashboard(containerId, { onEditRecord, onShowOnPlan,
   ].map(([st, tytul]) => {
     const recs = dane[st].filter((r) => !uzyte.has(klucz(st, r)));
     if (!recs.length) return '';
-    return `<li class="dash-node"><div class="dash-node-row"><span class="dash-node-label">${esc(tytul)} (${recs.length})</span></div><ul class="dash-children">${recs.map((r) => kafelek(st, r, new Set())).join('')}</ul></li>`;
+    const kz = `grupa:${st}`;
+    const html = recs.map((r) => kafelek(st, r, new Set())).join('');
+    return `<li class="dash-node"><div class="dash-node-row">${przelacznik(kz, html)}<span class="dash-node-label">${esc(tytul)} (${recs.length})</span></div><ul class="dash-children${czyZwiniety(kz) ? ' hidden' : ''}" data-dzieci="${esc(kz)}">${html}</ul></li>`;
   }).join('');
 
   container.innerHTML = `
     <div class="dash-pasek">
       ${onDodaj ? '<button type="button" class="btn-small btn-primary" data-dodaj-rozdzielnie="1">+ Dodaj rozdzielnię</button>' : ''}
+      <button type="button" class="btn-small" data-zwin-wszystko="rozwin">Rozwiń wszystko</button>
+      <button type="button" class="btn-small" data-zwin-wszystko="zwin">Zwiń do rozdzielni</button>
       <span class="field-hint">Kafelki to rekordy z Bazy urządzeń, ułożone wg pól „zasilany z” — te same połączenia co na Planie rejonu. Kliknij kafelek, żeby go edytować; „+ dodaj” — nowy element zasilany z tego kafelka.</span>
     </div>
     ${drzewo ? `<div class="dash-rejon"><ul class="dash-tree">${drzewo}</ul></div>` : ''}
@@ -139,6 +158,34 @@ export async function renderDashboard(containerId, { onEditRecord, onShowOnPlan,
   `;
 
   container.querySelector('[data-dodaj-rozdzielnie]')?.addEventListener('click', () => onDodaj('rozdzielnie', {}));
+  const ustawZwin = (btn, zw) => {
+    const kz = btn.dataset.zwin;
+    const ul = [...container.querySelectorAll('[data-dzieci]')].find((u) => u.dataset.dzieci === kz);
+    if (!ul) return;
+    ul.classList.toggle('hidden', zw);
+    btn.textContent = zw ? '▸' : '▾';
+    btn.setAttribute('aria-expanded', String(!zw));
+    btn.title = zw ? 'Rozwiń' : 'Zwiń';
+    const licz = btn.nextElementSibling?.classList.contains('dash-licznik') ? btn.nextElementSibling : null;
+    if (zw && !licz) btn.insertAdjacentHTML('afterend', `<span class="dash-licznik">${ul.querySelectorAll('.dash-node').length} el.</span>`);
+    if (!zw && licz) licz.remove();
+    zwiniecie[kz] = zw;
+  };
+  container.querySelectorAll('.dash-zwin').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      ustawZwin(btn, btn.getAttribute('aria-expanded') === 'true');
+      zapiszZwiniecie();
+    });
+  });
+  container.querySelectorAll('[data-zwin-wszystko]').forEach((b) => b.addEventListener('click', () => {
+    const rozwin = b.dataset.zwinWszystko === 'rozwin';
+    container.querySelectorAll('.dash-zwin').forEach((btn) => {
+      const kz = btn.dataset.zwin;
+      ustawZwin(btn, rozwin ? false : domyslnieZwiniety(kz));
+    });
+    zapiszZwiniecie();
+  }));
   container.querySelectorAll('.dash-dodaj').forEach((sel) => {
     sel.addEventListener('click', (e) => e.stopPropagation());
     sel.addEventListener('change', () => {
@@ -159,7 +206,7 @@ export async function renderDashboard(containerId, { onEditRecord, onShowOnPlan,
   if (onEditRecord) {
     container.querySelectorAll('.dash-clickable').forEach((el) => {
       const otworz = (event) => {
-        if (event.target.closest('.dash-plan-btn, .dash-dodaj')) return;
+        if (event.target.closest('.dash-plan-btn, .dash-dodaj, .dash-zwin')) return;
         onEditRecord(el.dataset.entity, Number(el.dataset.id));
       };
       el.addEventListener('click', otworz);

@@ -979,3 +979,8 @@ body.plan-pelny-body { overflow: hidden; }
 .dash-rodzaj { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; color: #607d8b; margin-right: 0.25rem; }
 .dash-dodaj { margin-left: auto; font-size: 0.78rem; padding: 1px 4px; border: 1px solid #90a4ae; border-radius: 10px; background: #fff; color: #263238; cursor: pointer; max-width: 9.5rem; }
 .dash-dodaj + .dash-plan-btn { margin-left: 0.3rem; }
+/* 06.11.2026: lamele Układu zasilania zwijane do rozdzielni */
+.dash-zwin { flex: 0 0 auto; width: 1.6rem; height: 1.6rem; margin-right: 0.35rem; border: 1px solid #90a4ae; border-radius: 4px; background: #fff; color: #263238; font-size: 0.85rem; line-height: 1; cursor: pointer; padding: 0; }
+.dash-zwin:hover { background: #eceff1; }
+.dash-zwin-pusty { flex: 0 0 auto; display: inline-block; width: 1.6rem; margin-right: 0.35rem; }
+.dash-licznik { font-size: 0.75rem; color: #607d8b; margin-right: 0.4rem; white-space: nowrap; }
