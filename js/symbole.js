@@ -100,6 +100,11 @@ export function symbolSvg(typ, x, y, obwodka, k = 1, nap = [null, null]) {
     return `<rect x="${x - w / 2 - f(4)}" y="${y - h / 2}" width="${w}" height="${h}" rx="${f(2)}" fill="#37474f" ${st}/>`
       + `<polygon points="${zeby.join(' ')}" fill="#ffb300" ${st}/><circle cx="${x + w / 2 + f(3)}" cy="${y}" r="${f(3)}" fill="#37474f"/>`;
   }
+  if (typ === 'pompa') {
+    // pompa (wg PN-EN 60617: koło z trójkątem kierunku przepływu), wypełnienie w kolorze wody
+    const r = f(10);
+    return `<circle cx="${x}" cy="${y}" r="${r}" fill="#ffffff" ${st}/><path d="M${x - r * 0.5},${y + r * 0.62} L${x},${y - r * 0.78} L${x + r * 0.5},${y + r * 0.62} z" fill="#0277bd" stroke="#0277bd" stroke-width="${Math.max(0.6, f(0.8))}"/>`;
+  }
   if (typ === 'maszyna') {
     // maszyna (wiertnica, ładowarka, kolejka…): korpus na kołach
     const w = f(24), h = f(12);

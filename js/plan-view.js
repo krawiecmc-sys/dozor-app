@@ -18,7 +18,7 @@
 // mało — dziesiątki obiektów), zdarzenia przez delegację na <svg>.
 
 import { nadzorGetAll, nadzorUpdate, nadzorAdd, nadzorDelete } from './db.js';
-import { NADZOR_ENTITIES, U_RODZAJE } from './nadzor-entities.js';
+import { NADZOR_ENTITIES, U_RODZAJE, POMPA } from './nadzor-entities.js';
 import { KOLOR, kolorNapiecia, kv, symbolSvg, napiecieRekordu, napieciaWtorne, rowneKV, napiecieSieci } from './symbole.js';
 import { wczytajKatalog, zapiszKatalog, typAparatu, NAPIECIA_KATALOGU } from './katalog-aparatow.js';
 import { ZASILANIE, jestOdbiornik, KONCOWE, rozwiaz, rodzajRek, polaczenia as polaczeniaSieci, zrodloRek as zrodloSieci, rodzajPolaczenia as rodzajPolaczeniaSieci, rejonySieci, MAGAZYNY_REJONU } from './siec-zasilania.js';
@@ -46,6 +46,7 @@ const ZRODLA_RODZAJU = {
   wylacznik: [['zasilane_z_transformatora', 'transformatory', 'transformatory'], ['zasilane_z_urzadzenia', 'urzadzenia', 'wylacznik'], ['zasilane_z_pola', 'poleRozdzielcze', 'poleRozdzielcze']],
   // odbiornik: z wyłącznika; odbiornik 6 kV (pompa odwadniania) wprost z pola
   odbiornik: [['zasilane_z_urzadzenia', 'urzadzenia', 'wylacznik'], ['zasilane_z_pola', 'poleRozdzielcze', 'poleRozdzielcze']],
+  pompa: [['zasilane_z_urzadzenia', 'urzadzenia', 'wylacznik'], ['zasilane_z_pola', 'poleRozdzielcze', 'poleRozdzielcze']], // pompa wodna = odbiornik
   kb: [['zasilany_z_urzadzenia', 'urzadzenia', 'wylacznik']],
   maszyny: [['zasilany_z_urzadzenia', 'urzadzenia', 'wylacznik']],
   przenosniki: [['zasilany_z_urzadzenia', 'urzadzenia', 'wylacznik']],
@@ -65,6 +66,8 @@ const RODZAJE = [
     zasilanyEtykieta: 'Zasilany z', uwaga: 'Wyłącznik, szafa stycznikowa albo zespół transformatorowy — zabezpiecza urządzenia końcowe. Zasilany z transformatora albo przelotem z innego wyłącznika; zwykle ma zasilanie i jeden odpływ. Napięcie (1 kV albo 0,5 kV) wynika ze strony wtórnej transformatora.' },
   { id: 'odbiornik', store: 'urzadzenia', label: 'Odbiornik (silnik, pompa, wentylator…)', krotko: 'Odbiornik', nazwa: 'nazwa', przyklad: 'np. pompa PH-1', nap: NAP_URZ, stale: { u_rodzaj: U_RODZAJE[1] },
     zasilanyEtykieta: 'Zasilany z wyłącznika', uwaga: 'Urządzenie końcowe (silnik, pompa, maszyna) — zasilane z wyłącznika, nie bezpośrednio z transformatora; nie ma przelotów i nic nie zasila. Napięcie jak wyłącznika, z którego jest zasilane.' },
+  { id: 'pompa', store: 'urzadzenia', label: 'Pompa wodna', krotko: 'Pompa', nazwa: 'nazwa', przyklad: 'np. pompa OW-1', nap: NAP_URZ, stale: { u_rodzaj: U_RODZAJE[1], o_rodzaj: 'pompa wodna' },
+    zasilanyEtykieta: 'Zasilana z wyłącznika', uwaga: 'Pompa wodna (odwadnianie) — urządzenie końcowe zasilane z wyłącznika; pompa 6 kV — wprost z pola rozdzielni. Wydajność i wysokość podnoszenia dopiszesz w zakładce Pompy wodne.' },
   { id: 'kb', store: 'kb', label: 'Kombajn / KB', krotko: 'Kombajn', nazwa: 'kb_nazwa', przyklad: 'np. AM-1',
     zasilanyEtykieta: 'Zasilany z wyłącznika', uwaga: 'Kombajn zasilany z wyłącznika.' },
   { id: 'maszyny', store: 'maszyny', label: 'Maszyna (wiertnica, ładowarka, kolejka…)', krotko: 'Maszyna', nazwa: 'm_nazwa', przyklad: 'np. wiertnica WD-1', nap: NAP_URZ,
@@ -518,10 +521,15 @@ export function createPlanView(containerId, ustawienia = {}) {
   const symbol = (typ, x, y, obwodka, k = sk(), nap = [null, null]) => symbolSvg(typ, x, y, obwodka, k, nap);
 
   // Krótkie dane pod nazwą obiektu (warstwa "Dane urządzeń")
+  // odbiornik: pompa wodna ma symbol pompy, pozostałe — silnik M
+  const jestPompa = (rec) => jestOdbiornik(rec) && rec.o_rodzaj === POMPA;
+  const symbolDef = (store, rec, def) => (store === 'urzadzenia' && jestOdbiornik(rec) ? { ...def, symbol: jestPompa(rec) ? 'pompa' : 'naped' } : def);
+
   function daneObiektu(store, rec) {
     const kw = (v, j) => (num(v) ? `${num(v)} ${j}` : '');
     if (store === 'rozdzielnie') return [rec.r_napiecie, rec.r_typ].filter(Boolean).join(' · ');
     if (store === 'transformatory') return [rec.t_typ, rec.t_napiecie, kw(rec.t_moc, 'kVA')].filter(Boolean).join(' · ');
+    if (store === 'urzadzenia' && jestPompa(rec)) return [rec.nap_zas, kw(rec.moc, 'kW'), kw(rec.pw_wydajnosc, 'm³/h'), num(rec.pw_wysokosc) ? `H ${num(rec.pw_wysokosc)} m` : '', rec.pw_miejsce].filter(Boolean).join(' · ');
     if (store === 'urzadzenia') return [rec.nap_zas, kw(rec.moc, 'kW')].filter(Boolean).join(' · ');
     if (store === 'kb') return [rec.typ_kb, rec.nap_zas].filter(Boolean).join(' · ');
     if (store === 'maszyny') return [rec.m_rodzaj, rec.nap_zas, num(rec.moc) ? `${rec.moc} kW` : ''].filter(Boolean).join(' · ');
@@ -531,7 +539,7 @@ export function createPlanView(containerId, ustawienia = {}) {
     return '';
   }
 
-  const ROZMIAR_BAZOWY = { rozdzielnia: [24, 15], transformator: [11, 17], naped: [11, 11], kombajn: [20, 10], maszyna: [13, 10], pole: [7, 7], urzadzenie: [13, 9] };
+  const ROZMIAR_BAZOWY = { rozdzielnia: [24, 15], transformator: [11, 17], naped: [11, 11], kombajn: [20, 10], maszyna: [13, 10], pompa: [11, 11], pole: [7, 7], urzadzenie: [13, 9] };
   const rozmiarSymbolu = (typ) => (ROZMIAR_BAZOWY[typ] || [12, 12]).map((v) => v * sk());
 
   // ---------- rysowanie ----------
@@ -606,7 +614,7 @@ export function createPlanView(containerId, ustawienia = {}) {
           : st === 'przenosniki' ? { store: st, symbol: 'naped', label: 'Przenośnik / napęd', title: 'pr_nr' }
             : OBIEKTY.find((o) => o.store === st);
         const rodzic = q.rodzic ? poz[q.rodzic] : null;
-        poz[k] = { x: p.x, y: p.y, lok: null, rec, rodzic: q.rodzic || null, obcy: rodzic ? rodzic.obcy : obcyEl(st, rec), def: st === 'urzadzenia' && jestOdbiornik(rec) ? { ...def, symbol: 'naped' } : def };
+        poz[k] = { x: p.x, y: p.y, lok: null, rec, rodzic: q.rodzic || null, obcy: rodzic ? rodzic.obcy : obcyEl(st, rec), def: symbolDef(st, rec, def) };
       }
       // silnik / czujnik — cienka szara linia do maszyny
       for (const q of Object.values(poz)) {
@@ -646,7 +654,7 @@ export function createPlanView(containerId, ustawienia = {}) {
         }
         x += num(rec.plan_dx) || 0;
         y += num(rec.plan_dy) || 0;
-        poz[`${def.store}:${rec.id}`] = { x, y, lok, def: def.store === 'urzadzenia' && jestOdbiornik(rec) ? { ...def, symbol: 'naped' } : def, rec, obcy: obcyEl(def.store, rec) };
+        poz[`${def.store}:${rec.id}`] = { x, y, lok, def: symbolDef(def.store, rec, def), rec, obcy: obcyEl(def.store, rec) };
       }
     }
     // 05.11.2026: rozdzielnia poza rejonem (może być daleko od początku schematu) — rysowana przed początkiem
@@ -884,7 +892,8 @@ export function createPlanView(containerId, ustawienia = {}) {
       ${pozycja('pole', 'Pole z wyłącznikiem', [6, 6])}
       ${pozycja('transformator', 'Transformator SN/nn')}
       ${pozycja('urzadzenie', 'Wyłącznik / szafa stycznikowa / zespół', [1, 1])}
-      ${pozycja('naped', 'Urządzenie końcowe (silnik M, pompa, napęd)')}
+      ${pozycja('naped', 'Urządzenie końcowe (silnik M, napęd)')}
+      ${pozycja('pompa', 'Pompa wodna')}
       ${pozycja('kombajn', 'Kombajn / KB')}
       ${kabel(KOLOR.sn, 'Zasilanie 6 kV', '', 2.8)}
       ${kabel(KOLOR.nn1, 'Zasilanie 1 kV', '', 2.0)}
@@ -1339,7 +1348,7 @@ export function createPlanView(containerId, ustawienia = {}) {
 
   // napięcia do wyboru w formularzu urządzenia przy danym źródle ('pole|magazyn|id'); null = pełna lista
   function opcjeNapieciaFormularza(rodzajId, wartoscZrodla, celRec = null) {
-    if (!['wylacznik', 'odbiornik', 'maszyny'].includes(rodzajId) || !wartoscZrodla) return null;
+    if (!['wylacznik', 'odbiornik', 'pompa', 'maszyny'].includes(rodzajId) || !wartoscZrodla) return null;
     const [, zStore, id] = String(wartoscZrodla).split('|');
     const zRec = (dane[zStore] || []).find((r) => r.id === Number(id));
     const o = opcjeOd(zStore, zRec, 'urzadzenia', { ...(celRec || {}), nap_zas: '' });
@@ -1349,7 +1358,7 @@ export function createPlanView(containerId, ustawienia = {}) {
   // napięcia do wyboru: część wspólna tego, co daje źródło, i tego, na czym pracuje typ aparatu z katalogu
   function napieciaDoWyboru(rodzajId, wartoscZrodla, celRec, nazwa) {
     const wgZrodla = opcjeNapieciaFormularza(rodzajId, wartoscZrodla, celRec);
-    const w = ['wylacznik', 'odbiornik'].includes(rodzajId) ? typAparatu(nazwa, katalog) : null;
+    const w = ['wylacznik', 'odbiornik', 'pompa'].includes(rodzajId) ? typAparatu(nazwa, katalog) : null;
     const baza = wgZrodla || NAP_URZ.opcje;
     if (!w) return { opcje: baza, uwaga: wgZrodla && wgZrodla.length > 1 ? 'Transformator dwunapięciowy — wybierz stronę wtórną.' : wgZrodla ? 'Napięcie wynika ze źródła.' : '' };
     const wspolne = baza.filter((o) => w.nap.some((x) => rowneKV(kv(x), kv(o))));
@@ -2032,5 +2041,5 @@ export function createPlanView(containerId, ustawienia = {}) {
     return true;
   }
 
-  return { init, pokaz, _test: { poLegalizacji, problemySilnikow, problemNapiecia, ukladSchematu, tryb, rejony, obcyRejon, ustawRejon: (r, pokazInne = true) => { mojRejon = r; warstwy.inneOddzialy = pokazInne; }, oddzialRek, ustawOddzial: (o, pokazInne = true) => { mojOddzial = o; warstwy.inneOddzialy = pokazInne; }, opisChodnika, opcjePrzy, pozycje: () => rysuj(widok, { szer: 1000, wys: 700 }).poz, problemTypu, napieciaDoWyboru, katalog: () => katalog, zrodlaDla, odplywyDla, zgodnePolaczenie, problemyPolaczenia, rodzajPolaczenia, opcjeNapieciaFormularza, napiecieEfektywne, kilkaOdplywow, polaczenia: () => polaczenia().wynik, wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
+  return { init, pokaz, _test: { symbolDef, poLegalizacji, problemySilnikow, problemNapiecia, ukladSchematu, tryb, rejony, obcyRejon, ustawRejon: (r, pokazInne = true) => { mojRejon = r; warstwy.inneOddzialy = pokazInne; }, oddzialRek, ustawOddzial: (o, pokazInne = true) => { mojOddzial = o; warstwy.inneOddzialy = pokazInne; }, opisChodnika, opcjePrzy, pozycje: () => rysuj(widok, { szer: 1000, wys: 700 }).poz, problemTypu, napieciaDoWyboru, katalog: () => katalog, zrodlaDla, odplywyDla, zgodnePolaczenie, problemyPolaczenia, rodzajPolaczenia, opcjeNapieciaFormularza, napiecieEfektywne, kilkaOdplywow, polaczenia: () => polaczenia().wynik, wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
 }
