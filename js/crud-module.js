@@ -31,28 +31,34 @@ function isExpired(dateStr) {
   return Date.now() - d.getTime() > ONE_YEAR_MS;
 }
 
-export function createCrudModule({ entities, examples = {}, tabsId, listId, formId, addBtnId }) {
+// 05.11.2026: tabs (opcjonalne) — zakładki jako widoki magazynów: { key, label, entity, filtr(rec), stale (wartości nowego
+// rekordu), labelSingular }; np. Wyłączniki i Odbiorniki końcowe to dwa widoki magazynu „urzadzenia” (bez kopiowania danych).
+export function createCrudModule({ entities, examples = {}, tabsId, listId, formId, addBtnId, tabs = null }) {
   const tabsEl = document.getElementById(tabsId);
   const listEl = document.getElementById(listId);
   const formContainerEl = document.getElementById(formId);
   const addBtn = document.getElementById(addBtnId);
 
   const entityKeys = Object.keys(entities);
-  let currentEntity = entityKeys[0];
+  const zakladki = (tabs || entityKeys.map((key) => ({ key, entity: key }))).map((t) => ({ label: entities[t.entity].label, ...t }));
+  let currentTab = zakladki[0].key;
+  let currentEntity = zakladki[0].entity;
+  const tab = () => zakladki.find((t) => t.key === currentTab) || zakladki[0];
+  const aktDef = () => ({ ...entities[currentEntity], ...(tab().labelSingular ? { labelSingular: tab().labelSingular } : {}) });
   let editingId = null;
   let sublistState = {}; // key -> array of row objects, żywe w trakcie edycji formularza
 
   function renderTabs() {
-    if (entityKeys.length <= 1) {
+    if (zakladki.length <= 1) {
       tabsEl.classList.add('hidden');
       return;
     }
 
-    tabsEl.innerHTML = entityKeys
+    tabsEl.innerHTML = zakladki
       .map(
-        (key) => `
-        <button class="chip ${key === currentEntity ? 'active' : ''}" data-entity="${key}">
-          ${escapeHtml(entities[key].label)}
+        (t) => `
+        <button class="chip ${t.key === currentTab ? 'active' : ''}" data-entity="${t.key}">
+          ${escapeHtml(t.label)}
         </button>
       `
       )
@@ -60,7 +66,8 @@ export function createCrudModule({ entities, examples = {}, tabsId, listId, form
 
     tabsEl.querySelectorAll('.chip').forEach((btn) => {
       btn.addEventListener('click', async () => {
-        currentEntity = btn.dataset.entity;
+        currentTab = btn.dataset.entity;
+        currentEntity = tab().entity;
         editingId = null;
         formContainerEl.classList.add('hidden');
         renderTabs();
@@ -121,8 +128,9 @@ export function createCrudModule({ entities, examples = {}, tabsId, listId, form
   }
 
   async function renderList() {
-    const def = entities[currentEntity];
-    const records = await nadzorGetAll(currentEntity);
+    const def = aktDef();
+    const filtr = tab().filtr;
+    const records = (await nadzorGetAll(currentEntity)).filter((r) => !filtr || filtr(r));
     const refCache = await fetchRefCache(def);
 
     if (records.length === 0) {
@@ -334,9 +342,9 @@ export function createCrudModule({ entities, examples = {}, tabsId, listId, form
 
   async function openForm(id) {
     editingId = id ?? null;
-    const def = entities[currentEntity];
+    const def = aktDef();
 
-    let record = {};
+    let record = { ...(tab().stale || {}) };
     if (editingId) {
       const all = await nadzorGetAll(currentEntity);
       record = all.find((r) => r.id === editingId) || {};
@@ -508,6 +516,9 @@ export function createCrudModule({ entities, examples = {}, tabsId, listId, form
   // Otwiera formularz edycji konkretnego rekordu z zewnątrz modułu — np.
   // z kliknięcia w węzeł dashboardu (patrz dashboard.js/app.js).
   async function editRecord(entityKey, id) {
+    const rec = (await nadzorGetAll(entityKey)).find((r) => r.id === id);
+    const t = zakladki.find((x) => x.entity === entityKey && (!x.filtr || !rec || x.filtr(rec))) || zakladki.find((x) => x.entity === entityKey);
+    if (t) currentTab = t.key;
     currentEntity = entityKey;
     renderTabs();
     await openForm(id);

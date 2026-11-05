@@ -440,6 +440,25 @@ export const NADZOR_ENTITIES = {
   },
 };
 
+// Zakładki Nadzoru w kolejności budowy sieci (05.11.2026, Piotr): rozdzielnia → pola → transformatory → wyłączniki →
+// odbiorniki końcowe → KB (rejon) → maszyny → napędy → silniki → chodniki. Wyłączniki i Odbiorniki końcowe to dwa widoki
+// tego samego magazynu „urzadzenia” (rozróżnia je pole Rodzaj) — bez kopiowania danych.
+const jestOdb = (r) => String(r?.u_rodzaj || '').startsWith('odbiornik');
+export const NADZOR_ZAKLADKI = [
+  { key: 'rozdzielnie', entity: 'rozdzielnie' },
+  { key: 'poleRozdzielcze', entity: 'poleRozdzielcze', label: 'Pola rozdzielcze' },
+  { key: 'transformatory', entity: 'transformatory' },
+  { key: 'wylaczniki', entity: 'urzadzenia', label: 'Wyłączniki / aparaty', labelSingular: 'wyłącznik / aparat', filtr: (r) => !jestOdb(r), stale: { u_rodzaj: U_RODZAJE[0] } },
+  { key: 'odbiorniki', entity: 'urzadzenia', label: 'Odbiorniki końcowe', labelSingular: 'odbiornik końcowy', filtr: jestOdb, stale: { u_rodzaj: U_RODZAJE[1] } },
+  { key: 'kb', entity: 'kb', label: 'KB (rejony)' },
+  { key: 'maszyny', entity: 'maszyny' },
+  { key: 'przenosniki', entity: 'przenosniki', label: 'Przenośniki / napędy' },
+  { key: 'silniki', entity: 'silniki' },
+  { key: 'chodniki', entity: 'chodniki' },
+  { key: 'czujniki', entity: 'czujniki' },
+  { key: 'przegladyBiezace', entity: 'przegladyBiezace' },
+];
+
 // Jeden jawnie fikcyjny rekord przykładowy na encję — pokazuje działanie UI,
 // zero realnych danych zakładowych. Kolejność wpisywania (rozdzielnie ->
 // silniki/czujniki -> kb -> poleRozdzielcze) jest tu nieistotna — to tylko

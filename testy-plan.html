@@ -385,6 +385,23 @@ try {
   ok(T.zrodlaDla('maszyny').every((o) => o.wartosc.includes('|urzadzenia|')), 'maszynę może zasilać tylko wyłącznik / aparat');
   const eksM = await db.exportAllData('tM');
   ok(Array.isArray(eksM.nadzor?.maszyny) && eksM.nadzor.maszyny.some((r) => r.m_nazwa === 'WD-1'), 'maszyny w kopii (eksport)');
+  // 16) Zakładki Nadzoru: Wyłączniki / Odbiorniki końcowe jako widoki jednego magazynu (05.11.2026)
+  document.body.insertAdjacentHTML('beforeend', '<nav id="tz-tabs"></nav><div id="tz-list"></div><div id="tz-form" class="hidden"></div><button id="tz-add">+</button>');
+  const { createCrudModule } = await import('./js/crud-module.js');
+  const ENT = await import('./js/nadzor-entities.js');
+  const crud = createCrudModule({ entities: ENT.NADZOR_ENTITIES, tabs: ENT.NADZOR_ZAKLADKI, tabsId: 'tz-tabs', listId: 'tz-list', formId: 'tz-form', addBtnId: 'tz-add' });
+  await crud.init();
+  const chipy = [...document.querySelectorAll('#tz-tabs .chip')].map((b) => b.textContent.trim());
+  ok(chipy.slice(0, 7).join('|') === 'Rozdzielnie|Pola rozdzielcze|Transformatory|Wyłączniki / aparaty|Odbiorniki końcowe|KB (rejony)|Maszyny', `kolejność zakładek wg budowy sieci (${chipy.slice(0, 7).join(', ')})`);
+  document.querySelector('#tz-tabs [data-entity="odbiorniki"]').click();
+  await new Promise((r) => setTimeout(r, 150));
+  const lista = document.getElementById('tz-list').textContent;
+  ok(lista.includes('REJ-pompa') && !lista.includes('REJ-WA'), 'Odbiorniki końcowe: tylko odbiorniki (pompa tak, wyłącznik nie)');
+  document.getElementById('tz-add').click();
+  await new Promise((r) => setTimeout(r, 150));
+  ok(document.querySelector('#tz-form [name="u_rodzaj"]')?.value === ENT.U_RODZAJE[1], 'nowy rekord w Odbiornikach ma rodzaj „odbiornik”');
+  await crud.editRecord('urzadzenia', WA);
+  ok(document.querySelector('#tz-tabs .chip.active')?.dataset.entity === 'wylaczniki', 'edycja wyłącznika z planu otwiera zakładkę Wyłączniki / aparaty');
   window.__niezgodne =[...document.querySelectorAll('#plan-braki details')].find((d) => d.textContent.includes('niezgodne'))?.textContent || '';
   window.__gotowe = true;
 } catch (e) {

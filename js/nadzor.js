@@ -1,8 +1,9 @@
 import { createCrudModule } from './crud-module.js';
-import { NADZOR_ENTITIES, NADZOR_EXAMPLES } from './nadzor-entities.js';
+import { NADZOR_ENTITIES, NADZOR_EXAMPLES, NADZOR_ZAKLADKI } from './nadzor-entities.js';
 
 const nadzorModule = createCrudModule({
   entities: NADZOR_ENTITIES,
+  tabs: NADZOR_ZAKLADKI,
   examples: NADZOR_EXAMPLES,
   tabsId: 'nadzor-entity-tabs',
   listId: 'nadzor-list-container',
