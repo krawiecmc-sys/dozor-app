@@ -6,11 +6,11 @@
 // Kafelek: klik = edycja rekordu w Bazie urządzeń; „+ dodaj” = nowy rekord zasilany z tego kafelka (formularz
 // z wpisanym źródłem); „na planie” = położenie na Planie rejonu.
 import { nadzorGetAll } from './db.js';
-import { polaczenia, rozwiaz, rodzajRek, rodzajPolaczenia, klucz, usunElementSieci } from './siec-zasilania.js';
+import { polaczenia, rozwiaz, rodzajRek, rodzajPolaczenia, klucz, usunElementSieci, polaRekordu } from './siec-zasilania.js';
 import { nadzorDelete } from './db.js';
 
 const ROK_MS = 365 * 24 * 60 * 60 * 1000;
-const MAGAZYNY = ['rozdzielnie', 'poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb', 'maszyny', 'przenosniki', 'silniki', 'czujniki'];
+const MAGAZYNY = ['rozdzielnie', 'poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb', 'maszyny', 'przenosniki', 'silniki', 'czujniki', 'chodniki'];
 const NA_PLANIE = new Set(['rozdzielnie', 'poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb', 'maszyny', 'przenosniki']);
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -35,7 +35,7 @@ function opisKafelka(store, rec) {
   switch (store) {
     case 'rozdzielnie': return ['Rozdzielnia', rec.nazwa_r, [rec.r_napiecie, rec.r_typ].filter(Boolean).join(' · ')];
     case 'poleRozdzielcze': return ['Pole', rec.p_nazwa, [rec.p_przeznaczenie, kab].filter(Boolean).join(' · ')];
-    case 'transformatory': return ['Transformator', rec.t_nr, [rec.t_typ, rec.t_napiecie, kw(rec.t_moc, 'kVA'), rec.oddzial ? `odd. ${rec.oddzial}` : '', kab].filter(Boolean).join(' · ')];
+    case 'transformatory': return ['Transformator', rec.t_nr, [rec.t_nr_kop ? `nr kop. ${rec.t_nr_kop}` : '', rec.t_typ, rec.t_napiecie, kw(rec.t_moc, 'kVA'), rec.oddzial ? `odd. ${rec.oddzial}` : '', kab].filter(Boolean).join(' · ')];
     case 'urzadzenia': return [String(rec.u_rodzaj || '').startsWith('odbiornik') ? 'Odbiornik' : 'Wyłącznik / aparat', `${rec.nazwa || ''}${rec.symbol ? ` (${rec.symbol})` : ''}`, [rec.nap_zas, kw(rec.moc, 'kW'), kab].filter(Boolean).join(' · ')];
     case 'kb': return ['Kombajn', rec.kb_nazwa, [rec.typ_kb, rec.nap_zas, kab].filter(Boolean).join(' · ')];
     case 'maszyny': return ['Maszyna', rec.m_nazwa, [rec.m_rodzaj, rec.m_typ, rec.nap_zas, kw(rec.moc, 'kW'), kab].filter(Boolean).join(' · ')];
@@ -108,6 +108,7 @@ export async function renderDashboard(containerId, { onEditRecord, onShowOnPlan,
       .slice()
       .sort((a, b) => (KOLEJNOSC[rodzajRek(a.store, a.rec)] ?? 9) - (KOLEJNOSC[rodzajRek(b.store, b.rec)] ?? 9));
     const dzieciHtml = lista.map((d) => kafelek(d.store, d.rec, dalej, d)).join('');
+    const daneRek = polaRekordu(store, rec, dane); // wszystkie wypełnione pola tabeli (jak karta na Planie rejonu)
     const opcje = DODAJ[rodzajRek(store, rec)] || [];
     const plus = opcje.length && onDodaj
       ? `<select class="dash-dodaj" data-dodaj="${store}:${rec.id}" title="Dodaj element zasilany z tego"><option value="">+ dodaj</option>${opcje.map(([, etyk], i) => `<option value="${i}">${esc(etyk)}</option>`).join('')}</select>`
@@ -121,10 +122,12 @@ export async function renderDashboard(containerId, { onEditRecord, onShowOnPlan,
           ${meta ? `<span class="dash-node-meta">${esc(meta)}</span>` : ''}
           ${stara ? '<span class="dash-node-flag">⚠ legalizacja &gt; 1 rok</span>' : ''}
           ${plus}
+          ${daneRek.length ? `<button type="button" class="dash-plan-btn dash-dane" data-dane="${esc(kz)}" title="Wszystkie dane z tabeli">dane (${daneRek.length}) ▾</button>` : ''}
           ${onEditRecord ? `<button type="button" class="dash-plan-btn dash-edytuj" data-edytuj="${store}:${rec.id}" title="Edytuj rekord">✎ edytuj</button>` : ''}
           <button type="button" class="dash-plan-btn dash-usun" data-usun="${store}:${rec.id}" title="Usuń z bazy">usuń</button>
           ${NA_PLANIE.has(store) && onShowOnPlan ? `<button type="button" class="dash-plan-btn" data-plan="${store}:${rec.id}" title="Pokaż na Planie rejonu">na planie</button>` : ''}
         </div>
+        ${daneRek.length ? `<table class="dash-szczegoly hidden" data-szczegoly="${esc(kz)}">${daneRek.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table>` : ''}
         ${dzieciHtml ? `<ul class="dash-children${czyZwiniety(kz) ? ' hidden' : ''}" data-dzieci="${esc(kz)}">${dzieciHtml}</ul>` : ''}
       </li>`;
   }
@@ -212,6 +215,14 @@ export async function renderDashboard(containerId, { onEditRecord, onShowOnPlan,
       usunieto = await usunElementSieci(dane, store, Number(id), nazwaKafelka);
     }
     if (usunieto) (onZmiana ? onZmiana() : renderDashboard(containerId, { onEditRecord, onShowOnPlan, onDodaj, onZmiana }));
+  }));
+  container.querySelectorAll('[data-dane]').forEach((b) => b.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const t = [...container.querySelectorAll('[data-szczegoly]')].find((x) => x.dataset.szczegoly === b.dataset.dane);
+    if (!t) return;
+    const pokaz = t.classList.contains('hidden');
+    t.classList.toggle('hidden', !pokaz);
+    b.textContent = b.textContent.replace(pokaz ? '▾' : '▴', pokaz ? '▴' : '▾');
   }));
   container.querySelectorAll('[data-edytuj]').forEach((b) => b.addEventListener('click', (event) => {
     event.stopPropagation();

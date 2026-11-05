@@ -993,3 +993,7 @@ body.plan-pelny-body { overflow: hidden; }
 .plan-podpowiedz:hover, .plan-podpowiedz:focus { background: #e3f2fd; }
 .plan-podpowiedz span { color: #546e7a; font-size: 0.8rem; }
 .plan-podpowiedz i { float: right; color: #78909c; font-size: 0.75rem; }
+/* 06.11.2026: wszystkie dane z tabeli w kafelku Układu zasilania */
+.dash-szczegoly { margin: 2px 0 6px 2.4rem; border-collapse: collapse; font-size: 0.82rem; background: #fff; max-width: calc(100% - 2.6rem); }
+.dash-szczegoly th { text-align: left; font-weight: 600; color: #546e7a; padding: 2px 10px 2px 6px; vertical-align: top; white-space: nowrap; border-bottom: 1px solid #eceff1; }
+.dash-szczegoly td { padding: 2px 6px; border-bottom: 1px solid #eceff1; word-break: break-word; }

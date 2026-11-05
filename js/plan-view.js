@@ -21,7 +21,7 @@ import { nadzorGetAll, nadzorUpdate, nadzorAdd, nadzorDelete } from './db.js';
 import { NADZOR_ENTITIES, U_RODZAJE } from './nadzor-entities.js';
 import { KOLOR, kolorNapiecia, kv, symbolSvg, napiecieRekordu, napieciaWtorne, rowneKV, napiecieSieci } from './symbole.js';
 import { wczytajKatalog, zapiszKatalog, typAparatu, NAPIECIA_KATALOGU } from './katalog-aparatow.js';
-import { ZASILANIE, jestOdbiornik, KONCOWE, rozwiaz, rodzajRek, polaczenia as polaczeniaSieci, zrodloRek as zrodloSieci, rodzajPolaczenia as rodzajPolaczeniaSieci, rejonySieci, MAGAZYNY_REJONU, usunElementSieci } from './siec-zasilania.js';
+import { ZASILANIE, jestOdbiornik, KONCOWE, rozwiaz, rodzajRek, polaczenia as polaczeniaSieci, zrodloRek as zrodloSieci, rodzajPolaczenia as rodzajPolaczeniaSieci, rejonySieci, MAGAZYNY_REJONU, usunElementSieci, polaRekordu } from './siec-zasilania.js';
 
 const OBIEKTY = [
   { store: 'rozdzielnie', label: 'Rozdzielnia', title: 'nazwa_r', symbol: 'rozdzielnia' },
@@ -550,7 +550,7 @@ export function createPlanView(containerId, ustawienia = {}) {
   function daneObiektu(store, rec) {
     const kw = (v, j) => (num(v) ? `${num(v)} ${j}` : '');
     if (store === 'rozdzielnie') return [rec.r_napiecie, rec.r_typ].filter(Boolean).join(' · ');
-    if (store === 'transformatory') return [rec.t_typ, rec.t_napiecie, kw(rec.t_moc, 'kVA')].filter(Boolean).join(' · ');
+    if (store === 'transformatory') return [rec.t_nr_kop ? `nr kop. ${rec.t_nr_kop}` : '', rec.t_typ, rec.t_napiecie, kw(rec.t_moc, 'kVA')].filter(Boolean).join(' · ');
     if (store === 'urzadzenia') return [rec.nap_zas, kw(rec.moc, 'kW')].filter(Boolean).join(' · ');
     if (store === 'kb') return [rec.typ_kb, rec.nap_zas].filter(Boolean).join(' · ');
     if (store === 'maszyny') return [rec.m_rodzaj, rec.nap_zas, num(rec.moc) ? `${rec.moc} kW` : ''].filter(Boolean).join(' · ');
@@ -1025,10 +1025,8 @@ export function createPlanView(containerId, ustawienia = {}) {
     const rec = (dane[store] || []).find((r) => r.id === id);
     const def = NADZOR_ENTITIES[store];
     if (!rec || !def) return;
-    const wiersze = def.fields
-      .filter((f) => f.type !== 'heading' && !f.key.startsWith('kabel'))
-      .map((f) => [f.label, wartoscPola(f, rec)])
-      .filter(([, v]) => v !== '' && v !== null && v !== undefined)
+    // wszystkie wypełnione pola tabeli (wspólne z kafelkiem Układu zasilania)
+    const wiersze = polaRekordu(store, rec, dane, { bezKabla: true })
       .map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`)
       .join('');
     const chNap = store === 'przenosniki' ? chodnikNapedu(rec) : rozwiaz(rec.lok_chodnik, dane.chodniki || [], 'ch_nazwa');

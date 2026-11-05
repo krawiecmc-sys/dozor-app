@@ -5,6 +5,7 @@
 // odbiorników końcowych).
 import { kv } from './symbole.js';
 import { nadzorGetAll, nadzorUpdate, nadzorDelete } from './db.js';
+import { NADZOR_ENTITIES } from './nadzor-entities.js';
 
 // Skąd brać źródło zasilania dla danego magazynu: [pole FK, magazyn źródła, pole nazwy źródła, prefiks pól kabla]
 export const ZASILANIE = {
@@ -213,4 +214,35 @@ export async function usunElementSieci(dane, store, id, opis = (st, r) => r[TYTU
   }
   for (const d of usuwane) await nadzorDelete(d.store, d.rec.id);
   return true;
+}
+
+// ---------- dane rekordu do pokazania (06.11.2026, Piotr: „wszystkie dane z tabeli muszą się podbierać”) ----------
+// Wszystkie wypełnione pola rekordu wprost z definicji tabeli (nadzor-entities.js) — karta na Planie rejonu i kafelek
+// w Układzie zasilania pokazują to samo, a nowe pole dodane do tabeli pojawi się w obu miejscach samo.
+// [[etykieta, wartość tekstowa], …]; bezKabla — pola kabla pomijane (pokazywane osobno jako opis kabla).
+export function polaRekordu(store, rec, dane, { bezKabla = false } = {}) {
+  const def = NADZOR_ENTITIES[store];
+  if (!def || !rec) return [];
+  const wynik = [];
+  for (const f of def.fields) {
+    if (f.type === 'heading' || (bezKabla && f.key.startsWith('kabel'))) continue;
+    const v = rec[f.key];
+    let t = '';
+    if (f.type === 'fk-or-free') {
+      if (typeof v === 'number') t = (dane[f.refStore] || []).find((x) => x.id === v)?.[f.refField] ?? `#${v} (brak w bazie)`;
+      else t = v ?? '';
+    } else if (f.type === 'fk-multi') {
+      t = (Array.isArray(v) ? v : []).map((id) => {
+        const r = (dane[f.refStore] || []).find((x) => x.id === id);
+        return r ? (f.refLabelFields || []).map((k) => r[k]).filter((x) => x !== undefined && x !== null && x !== '').join(' ') : `#${id}`;
+      }).join('; ');
+    } else if (f.type === 'sublist') {
+      t = (Array.isArray(v) ? v : []).map((w) => (f.subFields || []).map((sf) => (w?.[sf.key] ? `${sf.label}: ${w[sf.key]}` : '')).filter(Boolean).join(', ')).filter(Boolean).join(' | ');
+    } else {
+      t = v === 0 && f.blank ? '0' : v ?? '';
+    }
+    t = String(t ?? '').trim();
+    if (t) wynik.push([f.label, t]);
+  }
+  return wynik;
 }
