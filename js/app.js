@@ -1,6 +1,6 @@
 import { getAllRecords, reseedIfNeeded, filterRecords, wiedzaAddNew, wiedzaUpdate, wiedzaDelete } from './db.js';
 import { seedData, SEED_VERSION } from '../data/seed-data.js';
-import { initNadzor, refreshNadzor, editNadzorRecord } from './nadzor.js';
+import { initNadzor, refreshNadzor, editNadzorRecord, nowyRekordNadzoru } from './nadzor.js';
 import { initOugWug, refreshOugWug } from './oug-wug.js';
 import { initDiagnostyka, refreshDiagnostyka } from './diagnostyka.js';
 import { initSync, runIntegrityCheck } from './sync.js';
@@ -12,8 +12,7 @@ import { createImportExcel } from './import-excel.js';
 // — odwoływał się do starego schematu, zastąpiony formularzami z realnymi
 // kluczami (Faza 1) i widokiem graficznym poniżej (Faza 4).
 
-// 05.11.2026: Graf zasilania = widok schematyczny Planu rejonu (te same dane, reguły i edycja)
-const graphView = createPlanView('graf-content', { tryb: 'schemat' });
+// 06.11.2026 (Piotr): Graf zasilania usunięty — Układ zasilania to Mapa rejonu z kafelkami (dashboard.js)
 const planView = createPlanView('plan-content');
 
 // Kategorie "Wszystko"/"Normy techniczne"/"Schematy uniwersalne" usunięte
@@ -267,9 +266,11 @@ async function refreshActiveNadzorSub() {
         await editNadzorRecord(entityKey, id);
       },
       onShowOnPlan: (entityKey, id) => pokazNaPlanie(entityKey, id),
+      onDodaj: async (zakladka, preset) => {
+        switchNadzorSub('crud');
+        await nowyRekordNadzoru(zakladka, preset);
+      },
     });
-  } else if (nadzorActiveSub === 'graf') {
-    await graphView.init(opcjeGrafu());
   } else if (nadzorActiveSub === 'plan') {
     await planView.init(opcjePlanu());
   } else if (nadzorActiveSub === 'diagnostyka') {
@@ -309,14 +310,12 @@ const nadzorCrudAreaEl = document.getElementById('nadzor-crud-area');
 const nadzorOugwugAreaEl = document.getElementById('nadzor-ougwug-area');
 const nadzorDashboardAreaEl = document.getElementById('nadzor-dashboard-area');
 const nadzorDiagnostykaAreaEl = document.getElementById('nadzor-diagnostyka-area');
-const nadzorGrafAreaEl = document.getElementById('nadzor-graf-area');
 const nadzorPlanAreaEl = document.getElementById('nadzor-plan-area');
 const nadzorSubAreas = {
   crud: nadzorCrudAreaEl,
   ougwug: nadzorOugwugAreaEl,
   dashboard: nadzorDashboardAreaEl,
   diagnostyka: nadzorDiagnostykaAreaEl,
-  graf: nadzorGrafAreaEl,
   plan: nadzorPlanAreaEl,
 };
 
@@ -331,18 +330,7 @@ function opcjePlanu() {
       await editNadzorRecord(entityKey, id);
     },
     onShowInMap: (entityKey, id) => pokazWMapie(entityKey, id),
-    onPokazWInnymWidoku: (entityKey, id) => pokazWGrafie(entityKey, id),
   };
-}
-
-function opcjeGrafu() {
-  return { ...opcjePlanu(), onPokazWInnymWidoku: (entityKey, id) => pokazNaPlanie(entityKey, id) };
-}
-
-async function pokazWGrafie(entityKey, id) {
-  switchNadzorSub('graf');
-  await graphView.init(opcjeGrafu());
-  await graphView.pokaz(entityKey, id);
 }
 
 async function pokazNaPlanie(entityKey, id) {
@@ -361,24 +349,10 @@ async function pokazWMapie(entityKey, id) {
   el.scrollIntoView({ block: 'center' });
 }
 
-// 05.11.2026: zakładka Rejon = Plan rejonu albo Graf zasilania (ostatnio wybrany widok)
-const rejonWidokEl = document.getElementById('rejon-widok-switch');
-const ostatniWidokRejonu = () => { try { return localStorage.getItem('protektor-rejon-widok') === 'graf' ? 'graf' : 'plan'; } catch { return 'plan'; } };
-rejonWidokEl.addEventListener('click', async (event) => {
-  const btn = event.target.closest('[data-widok]');
-  if (!btn) return;
-  switchNadzorSub(btn.dataset.widok);
-  await refreshActiveNadzorSub();
-});
-
 function switchNadzorSub(subName) {
-  if (subName === 'rejon') subName = ostatniWidokRejonu();
-  const wRejonie = subName === 'plan' || subName === 'graf';
-  if (wRejonie) { try { localStorage.setItem('protektor-rejon-widok', subName); } catch {} }
-  rejonWidokEl.classList.toggle('hidden', !wRejonie);
-  rejonWidokEl.querySelectorAll('[data-widok]').forEach((b) => b.classList.toggle('active', b.dataset.widok === subName));
+  if (subName === 'rejon' || subName === 'graf') subName = 'plan'; // dawne zakładki (Rejon, Graf zasilania)
   nadzorSubSwitchEl.querySelectorAll('.section-btn').forEach((b) => {
-    const aktywny = b.dataset.sub === subName || (b.dataset.sub === 'rejon' && wRejonie);
+    const aktywny = b.dataset.sub === subName;
     b.classList.toggle('active', aktywny);
     // aktywna zakladka widoczna w przewijanym pasku (przewija pasek, nie strone)
     if (aktywny) {

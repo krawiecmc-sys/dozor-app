@@ -1055,7 +1055,7 @@ export function createPlanView(containerId, ustawienia = {}) {
         ${!SCHEMAT && MOZE_STAC_PRZY.has(store) ? `<button type="button" class="btn-small" data-umiejscowienie="${store}:${id}">Umiejscowienie…</button>` : ''}
         ${!SCHEMAT && (num(rec.plan_dx) || num(rec.plan_dy)) ? `<button type="button" class="btn-small" data-reset="${store}:${id}">Cofnij przesunięcie</button>` : ''}
         ${onPokazWInnymWidoku ? `<button type="button" class="btn-small" data-inny-widok="${store}:${id}">${SCHEMAT ? 'Na planie' : 'W grafie'}</button>` : ''}
-        ${onShowInMap ? `<button type="button" class="btn-small" data-mapa="${store}:${id}">W Mapie</button>` : ''}
+        ${onShowInMap ? `<button type="button" class="btn-small" data-mapa="${store}:${id}">W układzie zasilania</button>` : ''}
         <button type="button" class="btn-small btn-danger" data-usun="${store}:${id}">Usuń</button>
         <button type="button" class="btn-small" data-akcja="zamknij-karte">Zamknij</button>
       </div>`, x, y);

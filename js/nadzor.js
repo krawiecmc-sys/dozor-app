@@ -14,3 +14,4 @@ const nadzorModule = createCrudModule({
 export const initNadzor = nadzorModule.init;
 export const refreshNadzor = nadzorModule.refresh;
 export const editNadzorRecord = nadzorModule.editRecord;
+export const nowyRekordNadzoru = nadzorModule.nowyRekord;

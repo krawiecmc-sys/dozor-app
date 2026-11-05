@@ -1,326 +1,172 @@
-// Dashboard: drzewiasta mapa urządzeń rejonu — NIE jest to wykres
-// statystyczny (bez porównania wielkości/trendu/udziału), więc nie ma tu
-// kolorystyki kategorialnej/sekwencyjnej — to drzewo nawigacyjne w spójnym
-// języku wizualnym appki (te same kolory co reszta PROTEKTORA).
-//
-// Od 31.08.2026 hierarchia idzie po REALNYCH kluczach obcych (fk-or-free /
-// fk-multi, patrz nadzor-entities.js/crud-module.js), nie po dopasowaniu
-// tekstu jak w poprzednim schemacie: Rozdzielnia -> Pole rozdzielcze
-// (miejsce_zabudowy) -> KB (zasilany_z_pola) -> Silniki/Czujniki (fk-multi).
-// 01.09.2026: dołożone Urządzenia (Transformator -> Urządzenie -> ...
-// -> Urządzenie/KB, self-referencja + drugie, opcjonalne pole na KB) — patrz
-// renderUrzadzeniaFor/renderKbFor. Rozdzielnia dostała też self-referencyjne
-// "zasilana z — główne/rezerwowe", ale świadomie TYLKO dla Grafu zasilania
-// i integralności danych — Mapa rejonu nadal traktuje wszystkie Rozdzielnie
-// jako korzenie drzewa (dwa możliwe rodzice nie dają się czysto zagnieździć
-// w drzewie bez duplikowania poddrzewa).
-// Pole rozdzielcze/KB mogą wciąż wskazywać "rodzica" wolnym tekstem (opcja
-// "inny, wpisz ręcznie") — dopasowanie w takim przypadku jest po nazwie,
-// więc rekordy, których nic nie dopasuje, nadal trafiają do sekcji
-// "Niepowiązane" zamiast po cichu zniknąć z widoku. Każdy węzeł odpowiadający
-// realnemu rekordowi jest klikalny — otwiera jego edycję (onEditRecord).
-
+// Układ zasilania (dawna Mapa rejonu) — kafelki z danych tabel Bazy urządzeń, ułożone w drzewo zasilania:
+// rozdzielnia → pola → transformatory (przeloty) → wyłączniki → urządzenia końcowe (odbiorniki, KB, maszyny,
+// napędy) → silniki i czujniki. 06.11.2026 (Piotr): „układ zasilania ma być mapą rejonu z kafelkami z danych tabel
+// lub wpisywanych ręcznie, edytowalnymi”, „dane muszą pokrywać się z danymi z tabel” — połączenia liczy ten sam
+// moduł co Plan rejonu (siec-zasilania.js), z pól „zasilany z”; Mapa nie ma własnej kopii danych ani reguł.
+// Kafelek: klik = edycja rekordu w Bazie urządzeń; „+ dodaj” = nowy rekord zasilany z tego kafelka (formularz
+// z wpisanym źródłem); „na planie” = położenie na Planie rejonu.
 import { nadzorGetAll } from './db.js';
+import { polaczenia, rozwiaz, rodzajRek, rodzajPolaczenia, klucz } from './siec-zasilania.js';
 
-const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+const ROK_MS = 365 * 24 * 60 * 60 * 1000;
+const MAGAZYNY = ['rozdzielnie', 'poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb', 'maszyny', 'przenosniki', 'silniki', 'czujniki'];
+const NA_PLANIE = new Set(['rozdzielnie', 'poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb', 'maszyny', 'przenosniki']);
 
-function escapeHtml(str) {
-  const div = document.createElement('div');
-  div.textContent = str ?? '';
-  return div.innerHTML;
+const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const poLegalizacji = (rec) => Array.isArray(rec?.nastawy_zabezpieczen) && rec.nastawy_zabezpieczen.some((w) => {
+  const d = new Date(w?.legalizacja || '');
+  return w?.legalizacja && !Number.isNaN(d.getTime()) && Date.now() - d.getTime() > ROK_MS;
+});
+
+// co można dodać „+ dodaj” z kafelka danego rodzaju: [zakładka Bazy urządzeń, etykieta, pole źródła, stałe wartości]
+const DODAJ = {
+  rozdzielnie: [['poleRozdzielcze', 'pole rozdzielcze', 'miejsce_zabudowy']],
+  poleRozdzielcze: [['transformatory', 'transformator', 'zasilany_z_pola'], ['wylaczniki', 'aparat 6 kV (SK, APST…)', 'zasilane_z_pola', { nap_zas: '6 kV' }], ['odbiorniki', 'pompa / odbiornik 6 kV', 'zasilane_z_pola', { nap_zas: '6 kV' }]],
+  transformatory: [['wylaczniki', 'wyłącznik / szafa / zespół', 'zasilane_z_transformatora'], ['transformatory', 'transformator (przelot 6 kV)', 'zasilany_z_transformatora']],
+  wylacznik: [['odbiorniki', 'odbiornik końcowy', 'zasilane_z_urzadzenia'], ['kb', 'kombajn KB', 'zasilany_z_urzadzenia'], ['maszyny', 'maszyna', 'zasilany_z_urzadzenia'], ['przenosniki', 'napęd przenośnika', 'zasilany_z_urzadzenia'], ['wylaczniki', 'wyłącznik (przelot)', 'zasilane_z_urzadzenia']],
+};
+// kolejność rodzeństwa: przeloty i aparaty, potem urządzenia końcowe, kombajn na końcu
+const KOLEJNOSC = { poleRozdzielcze: 0, transformatory: 1, wylacznik: 2, odbiornik: 3, maszyny: 4, przenosniki: 5, kb: 6, silniki: 7, czujniki: 8 };
+
+function opisKafelka(store, rec) {
+  const kw = (v, j) => (Number(v) ? `${Number(v)} ${j}` : '');
+  const kab = rec.kabel_nr ? `kabel ${[rec.kabel_nr, rec.kabel_typ, rec.kabel_przekroj, rec.kabel_dlugosc ? `${rec.kabel_dlugosc} m` : ''].filter(Boolean).join(' ')}` : '';
+  switch (store) {
+    case 'rozdzielnie': return ['Rozdzielnia', rec.nazwa_r, [rec.r_napiecie, rec.r_typ].filter(Boolean).join(' · ')];
+    case 'poleRozdzielcze': return ['Pole', rec.p_nazwa, [rec.p_przeznaczenie, kab].filter(Boolean).join(' · ')];
+    case 'transformatory': return ['Transformator', rec.t_nr, [rec.t_typ, rec.t_napiecie, kw(rec.t_moc, 'kVA'), rec.oddzial ? `odd. ${rec.oddzial}` : '', kab].filter(Boolean).join(' · ')];
+    case 'urzadzenia': return [String(rec.u_rodzaj || '').startsWith('odbiornik') ? 'Odbiornik' : 'Wyłącznik / aparat', `${rec.nazwa || ''}${rec.symbol ? ` (${rec.symbol})` : ''}`, [rec.nap_zas, kw(rec.moc, 'kW'), kab].filter(Boolean).join(' · ')];
+    case 'kb': return ['Kombajn', rec.kb_nazwa, [rec.typ_kb, rec.nap_zas, kab].filter(Boolean).join(' · ')];
+    case 'maszyny': return ['Maszyna', rec.m_nazwa, [rec.m_rodzaj, rec.m_typ, rec.nap_zas, kw(rec.moc, 'kW'), kab].filter(Boolean).join(' · ')];
+    case 'przenosniki': return ['Napęd przenośnika', [rec.pr_typ, rec.pr_nr].filter(Boolean).join(' '), [rec.nap_zas, kw(rec.pr_moc, 'kW'), kab].filter(Boolean).join(' · ')];
+    case 'silniki': return ['Silnik', rec.nazwa_silnika, [kw(rec.s_moc, 'kW'), rec.napiecie_zas, rec.s_rodzaj].filter(Boolean).join(' · ')];
+    case 'czujniki': return ['Czujnik', rec.nazwa_czujnik, rec.opis || ''];
+    default: return ['', `#${rec.id}`, ''];
+  }
 }
 
-function hasExpiredZabezpieczenie(zabezpieczenia) {
-  if (!Array.isArray(zabezpieczenia)) return false;
-  return zabezpieczenia.some((row) => {
-    if (!row.legalizacja) return false;
-    const d = new Date(row.legalizacja);
-    if (Number.isNaN(d.getTime())) return false;
-    return Date.now() - d.getTime() > ONE_YEAR_MS;
-  });
-}
-
-// Elementy, które mają miejsce na Planie rejonu (03.11.2026: przejście Mapa -> Plan)
-const NA_PLANIE = new Set(['rozdzielnie', 'poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb', 'maszyny']);
-
-function node(label, { expired = false, meta = '', entityKey = null, id = null } = {}, childrenHtml = '') {
-  const clickableAttrs = entityKey ? `data-entity="${entityKey}" data-id="${id}" tabindex="0"` : '';
-  const clickableClass = entityKey ? 'dash-clickable' : '';
-  return `
-    <li class="dash-node">
-      <div class="dash-node-row ${expired ? 'expired' : ''} ${clickableClass}" ${clickableAttrs}>
-        <span class="dash-node-label">${escapeHtml(label)}</span>
-        ${meta ? `<span class="dash-node-meta">${escapeHtml(meta)}</span>` : ''}
-        ${expired ? '<span class="dash-node-flag">⚠ legalizacja &gt; 1 rok</span>' : ''}
-        ${entityKey && NA_PLANIE.has(entityKey) ? `<button type="button" class="dash-plan-btn" data-plan="${entityKey}:${id}" title="Pokaż na Planie rejonu">na planie</button>` : ''}
-      </div>
-      ${childrenHtml ? `<ul class="dash-children">${childrenHtml}</ul>` : ''}
-    </li>
-  `;
-}
-
-// Rozwiązuje pole typu fk-or-free (wartość = numeryczne id ALBO wolny tekst)
-// względem konkretnego rekordu-rodzica. Zwraca true, jeśli dana wartość
-// odnosi się do przekazanego rekordu rodzica.
-function wskazujeNa(wartosc, rekordRodzica, poleWyswietlaneRodzica) {
-  if (wartosc === undefined || wartosc === null || wartosc === '') return false;
-  if (typeof wartosc === 'number') return wartosc === rekordRodzica.id;
-  return String(wartosc).trim().toLowerCase() === String(rekordRodzica[poleWyswietlaneRodzica] || '').trim().toLowerCase();
-}
-
-export async function renderDashboard(containerId, { onEditRecord, onShowOnPlan } = {}) {
+export async function renderDashboard(containerId, { onEditRecord, onShowOnPlan, onDodaj } = {}) {
   const container = document.getElementById(containerId);
+  const listy = await Promise.all(MAGAZYNY.map((m) => nadzorGetAll(m)));
+  const dane = Object.fromEntries(MAGAZYNY.map((m, i) => [m, listy[i]]));
 
-  const [rozdzielnie, poleRozdzielcze, transformatory, urzadzenia, kb, silniki, czujniki] = await Promise.all([
-    nadzorGetAll('rozdzielnie'),
-    nadzorGetAll('poleRozdzielcze'),
-    nadzorGetAll('transformatory'),
-    nadzorGetAll('urzadzenia'),
-    nadzorGetAll('kb'),
-    nadzorGetAll('silniki'),
-    nadzorGetAll('czujniki'),
-  ]);
-
-  const silnikiById = new Map(silniki.map((s) => [s.id, s]));
-  const czujnikiById = new Map(czujniki.map((c) => [c.id, c]));
-
-  const maszyny = await nadzorGetAll('maszyny');
-  const usedIds = { poleRozdzielcze: new Set(), transformatory: new Set(), urzadzenia: new Set(), kb: new Set(), maszyny: new Set(), silniki: new Set(), czujniki: new Set() };
-
-  function renderSilnikiCzujnikiFor(kbRecord) {
-    const silnikiHtml = (Array.isArray(kbRecord.silniki) ? kbRecord.silniki : [])
-      .map((id) => {
-        const s = silnikiById.get(id);
-        if (!s) return node(`⚠ silnik #${id} — nie znaleziono (usunięty?)`, {});
-        usedIds.silniki.add(s.id);
-        return node(`Silnik: ${s.nazwa_silnika}`, {
-          meta: [s.s_moc ? `${s.s_moc} kW` : '', s.napiecie_zas, s.s_rodzaj].filter(Boolean).join(' · '),
-          entityKey: 'silniki',
-          id: s.id,
-        });
-      })
-      .join('');
-    const czujnikiHtml = (Array.isArray(kbRecord.czujniki) ? kbRecord.czujniki : [])
-      .map((id) => {
-        const c = czujnikiById.get(id);
-        if (!c) return node(`⚠ czujnik #${id} — nie znaleziono (usunięty?)`, {});
-        usedIds.czujniki.add(c.id);
-        return node(`Czujnik: ${c.nazwa_czujnik}`, { meta: c.opis || '', entityKey: 'czujniki', id: c.id });
-      })
-      .join('');
-    return silnikiHtml + czujnikiHtml;
+  // dzieci każdego elementu — z tych samych połączeń co Plan rejonu (bez kabli rezerwowych)
+  const dzieci = new Map();
+  const dodajDziecko = (kz, wpis) => { if (!dzieci.has(kz)) dzieci.set(kz, []); dzieci.get(kz).push(wpis); };
+  for (const p of polaczenia(dane).wynik) {
+    if (p.prefiks === 'kabel_rez' || p.cel.store === 'rozdzielnie') continue;
+    const odnosnik = p.zrodlo.store === 'poleRozdzielcze' && p.cel.store === 'poleRozdzielcze'; // pole zasilające innej rozdzielni
+    dodajDziecko(klucz(p.zrodlo.store, p.zrodlo.rec), { store: p.cel.store, rec: p.cel.rec, przelot: rodzajPolaczenia(p) === 'przelot', odnosnik });
   }
-
-  // 01.09.2026: KB może być zasilane bezpośrednio z Transformatora ALBO z
-  // końca łańcucha Urządzeń — stąd parentTyp, żeby wiedzieć którym polem
-  // dopasowywać (zasilany_z_transformatora vs zasilany_z_urzadzenia).
-  function renderKbFor(parentTyp, parentRecord) {
-    const poleWyswietlaneRodzica = parentTyp === 'transformatory' ? 't_nr' : 'nazwa';
-    const poleZasilania = parentTyp === 'transformatory' ? 'zasilany_z_transformatora' : 'zasilany_z_urzadzenia';
-    return kb
-      .filter((k) => wskazujeNa(k[poleZasilania], parentRecord, poleWyswietlaneRodzica))
-      .map((k) => {
-        usedIds.kb.add(k.id);
-        return node(
-          `${k.typ_kb ? k.typ_kb + ' — ' : ''}${k.kb_nazwa}`,
-          { expired: hasExpiredZabezpieczenie(k.nastawy_zabezpieczen), entityKey: 'kb', id: k.id },
-          renderSilnikiCzujnikiFor(k)
-        );
-      })
-      .join('');
+  // pola w swojej rozdzielni; pole zasilające (przelot z innej rozdzielni) też jest pokazane przy swojej rozdzielni
+  for (const pole of dane.poleRozdzielcze) {
+    const r = rozwiaz(pole.miejsce_zabudowy, dane.rozdzielnie, 'nazwa_r');
+    if (r) dodajDziecko(klucz('rozdzielnie', r), { store: 'poleRozdzielcze', rec: pole, zasilajace: !!rozwiaz(pole.zasilane_z_pola, dane.poleRozdzielcze, 'p_nazwa') });
   }
-
-  // 05.11.2026: maszyny (wiertnice, ładowarki…) — zasilane z wyłącznika, z silnikami jak KB
-  function renderMaszynyFor(parentRecord) {
-    return maszyny
-      .filter((m) => wskazujeNa(m.zasilany_z_urzadzenia, parentRecord, 'nazwa'))
-      .map((m) => {
-        usedIds.maszyny.add(m.id);
-        return node(`${m.m_rodzaj ? m.m_rodzaj + ' — ' : ''}${m.m_nazwa}`, { expired: hasExpiredZabezpieczenie(m.nastawy_zabezpieczen), entityKey: 'maszyny', id: m.id }, renderSilnikiCzujnikiFor(m));
-      })
-      .join('');
-  }
-
-  // Urządzenie może być zasilane z Transformatora ALBO z innego Urządzenia
-  // (self-referencja w nadzor-entities.js: zasilane_z_urzadzenia) — stąd
-  // parametr parentTyp, żeby wiedzieć którym polem/kluczem dopasowywać.
-  // Rekurencja obsługuje łańcuchy urządzenie -> urządzenie dowolnej długości,
-  // a na końcu każdego urządzenia dorzuca też KB, które mogą być zasilane
-  // właśnie z niego (nie tylko bezpośrednio z transformatora).
-  //
-  // ancestorIds śledzi łańcuch przodków w TEJ gałęzi drzewa — jeśli
-  // urządzenie wskazuje na coś, co już jest jego własnym przodkiem (albo na
-  // samo siebie), to cykl w danych; bez tej ochrony rekurencja poniżej
-  // zawiesiłaby przeglądarkę (crud-module.js NIE blokuje takich pętli przy
-  // wypełnianiu formularza — patrz komentarz w nadzor-entities.js).
-  // Urządzenie: z transformatora, z innego urządzenia albo (aparat / pompa 6 kV) wprost z pola.
-  // Transformator: z pola, z przelotu 6 kV innego transformatora albo z aparatu 6 kV (03.11.2026).
-  // przodkowie = klucze "typ:id" w tej gałęzi — pętla w danych nie zawiesi przeglądarki
-  // (crud-module.js nie blokuje pętli przy wypełnianiu formularza).
-  const POLE_RODZICA_URZ = { transformatory: ['zasilane_z_transformatora', 't_nr'], urzadzenia: ['zasilane_z_urzadzenia', 'nazwa'], poleRozdzielcze: ['zasilane_z_pola', 'p_nazwa'] };
-  const POLE_RODZICA_TR = { poleRozdzielcze: ['zasilany_z_pola', 'p_nazwa'], transformatory: ['zasilany_z_transformatora', 't_nr'], urzadzenia: ['zasilany_z_urzadzenia', 'nazwa'] };
-
-  function renderUrzadzeniaFor(parentTyp, parentRecord, przodkowie = new Set()) {
-    const [poleZasilania, poleWyswietlaneRodzica] = POLE_RODZICA_URZ[parentTyp];
-    return urzadzenia
-      .filter((u) => !(parentTyp === 'urzadzenia' && u.id === parentRecord.id) && wskazujeNa(u[poleZasilania], parentRecord, poleWyswietlaneRodzica))
-      .map((u) => {
-        usedIds.urzadzenia.add(u.id);
-        const klucz = `u:${u.id}`;
-        if (przodkowie.has(klucz)) {
-          return node(`⚠ ${u.nazwa} — pętla zasilania w danych, popraw ręcznie`, { entityKey: 'urzadzenia', id: u.id });
+  for (const st of ['kb', 'maszyny', 'przenosniki', 'urzadzenia']) {
+    for (const rec of dane[st]) {
+      for (const sm of ['silniki', 'czujniki']) {
+        for (const id of Array.isArray(rec[sm]) ? rec[sm] : []) {
+          const x = dane[sm].find((r) => r.id === id);
+          if (x) dodajDziecko(klucz(st, rec), { store: sm, rec: x });
         }
-        const dalej = new Set(przodkowie);
-        dalej.add(klucz);
-        return node(
-          `${String(u.u_rodzaj || '').startsWith('odbiornik') ? 'Odbiornik' : 'Wyłącznik / aparat'}: ${u.nazwa}${u.symbol ? ` (${u.symbol})` : ''}`,
-          {
-            meta: [u.moc ? `${u.moc} kW` : '', u.nap_zas].filter(Boolean).join(' · '),
-            expired: hasExpiredZabezpieczenie(u.nastawy_zabezpieczen),
-            entityKey: 'urzadzenia',
-            id: u.id,
-          },
-          renderTransformatoryFor(u, 'urzadzenia', dalej) + renderUrzadzeniaFor('urzadzenia', u, dalej) + renderKbFor('urzadzenia', u) + renderMaszynyFor(u)
-        );
-      })
-      .join('');
+      }
+    }
   }
 
-  function renderTransformatoryFor(parentRecord, parentTyp = 'poleRozdzielcze', przodkowie = new Set()) {
-    const [poleZasilania, poleWyswietlaneRodzica] = POLE_RODZICA_TR[parentTyp];
-    return transformatory
-      .filter((t) => !(parentTyp === 'transformatory' && t.id === parentRecord.id) && wskazujeNa(t[poleZasilania], parentRecord, poleWyswietlaneRodzica))
-      .map((t) => {
-        usedIds.transformatory.add(t.id);
-        const klucz = `t:${t.id}`;
-        if (przodkowie.has(klucz)) {
-          return node(`⚠ Transformator ${t.t_nr} — pętla zasilania w danych, popraw ręcznie`, { entityKey: 'transformatory', id: t.id });
-        }
-        const dalej = new Set(przodkowie);
-        dalej.add(klucz);
-        return node(
-          `Transformator ${t.t_nr}${parentTyp === 'transformatory' ? ' (przelot 6 kV)' : ''}`,
-          {
-            meta: [t.t_typ, t.t_napiecie, t.t_nastawa_zabezpieczen].filter(Boolean).join(' · '),
-            expired: hasExpiredZabezpieczenie(t.nastawy_zabezpieczen),
-            entityKey: 'transformatory',
-            id: t.id,
-          },
-          renderTransformatoryFor(t, 'transformatory', dalej) + renderKbFor('transformatory', t) + renderUrzadzeniaFor('transformatory', t, dalej)
-        );
-      })
-      .join('');
+  const uzyte = new Set();
+  function kafelek(store, rec, sciezka, { przelot = false, zasilajace = false, odnosnik = false } = {}) {
+    const kz = klucz(store, rec);
+    const [rodzaj, nazwa, meta] = opisKafelka(store, rec);
+    if (odnosnik) {
+      const r = rozwiaz(rec.miejsce_zabudowy, dane.rozdzielnie, 'nazwa_r');
+      return `<li class="dash-node"><div class="dash-node-row dash-clickable" data-entity="${store}" data-id="${rec.id}" tabindex="0"><span class="dash-node-label">→ przelot 6 kV do: ${esc(nazwa)}${r ? ` (rozdzielnia ${esc(r.nazwa_r)})` : ''}</span></div></li>`;
+    }
+    const stara = poLegalizacji(rec);
+    if (sciezka.has(kz)) {
+      return `<li class="dash-node"><div class="dash-node-row expired dash-clickable" data-entity="${store}" data-id="${rec.id}" tabindex="0"><span class="dash-node-label">⚠ ${esc(rodzaj)} ${esc(nazwa)} — pętla zasilania w danych, popraw</span></div></li>`;
+    }
+    const pierwszy = !uzyte.has(kz);
+    uzyte.add(kz);
+    const dalej = new Set(sciezka).add(kz);
+    const lista = (pierwszy ? dzieci.get(kz) || [] : [])
+      .slice()
+      .sort((a, b) => (KOLEJNOSC[rodzajRek(a.store, a.rec)] ?? 9) - (KOLEJNOSC[rodzajRek(b.store, b.rec)] ?? 9));
+    const dzieciHtml = lista.map((d) => kafelek(d.store, d.rec, dalej, d)).join('');
+    const opcje = DODAJ[rodzajRek(store, rec)] || [];
+    const plus = opcje.length && onDodaj
+      ? `<select class="dash-dodaj" data-dodaj="${store}:${rec.id}" title="Dodaj element zasilany z tego"><option value="">+ dodaj</option>${opcje.map(([, etyk], i) => `<option value="${i}">${esc(etyk)}</option>`).join('')}</select>`
+      : '';
+    const dopisek = [przelot ? 'przelot 6 kV' : '', zasilajace ? 'pole zasilające' : '', pierwszy ? '' : 'szczegóły wyżej'].filter(Boolean).join(' · ');
+    return `
+      <li class="dash-node">
+        <div class="dash-node-row ${stara ? 'expired' : ''} dash-clickable" data-entity="${store}" data-id="${rec.id}" tabindex="0">
+          <span class="dash-node-label"><span class="dash-rodzaj">${esc(rodzaj)}</span> ${esc(nazwa || '(bez nazwy)')}${dopisek ? ` <i>(${esc(dopisek)})</i>` : ''}</span>
+          ${meta ? `<span class="dash-node-meta">${esc(meta)}</span>` : ''}
+          ${stara ? '<span class="dash-node-flag">⚠ legalizacja &gt; 1 rok</span>' : ''}
+          ${plus}
+          ${NA_PLANIE.has(store) && onShowOnPlan ? `<button type="button" class="dash-plan-btn" data-plan="${store}:${rec.id}" title="Pokaż na Planie rejonu">na planie</button>` : ''}
+        </div>
+        ${dzieciHtml ? `<ul class="dash-children">${dzieciHtml}</ul>` : ''}
+      </li>`;
   }
 
-  // 03.11.2026: przelot 6 kV pole -> pole (jak na Planie rejonu i w Grafie) — w Mapie jako opis
-  // przy polu, bez zagnieżdżania drugiej rozdzielni (inaczej poddrzewo by się dublowało).
-  function metaPola(p) {
-    const nazwa = (q) => {
-      const r = rozdzielnie.find((x) => wskazujeNa(q.miejsce_zabudowy, x, 'nazwa_r'));
-      return r ? `${q.p_nazwa} (${r.nazwa_r})` : q.p_nazwa;
-    };
-    const z = poleRozdzielcze.find((q) => q.id !== p.id && wskazujeNa(p.zasilane_z_pola, q, 'p_nazwa'));
-    const doPol = poleRozdzielcze.filter((q) => q.id !== p.id && wskazujeNa(q.zasilane_z_pola, p, 'p_nazwa'));
-    return [
-      p.p_przeznaczenie || '',
-      z ? `przelot z: ${nazwa(z)}` : p.zasilane_z_pola ? `przelot z: ${p.zasilane_z_pola}` : '',
-      doPol.length ? `przelot do: ${doPol.map(nazwa).join(', ')}` : '',
-      p.p_zasilane_z ? `zasilane z: ${p.p_zasilane_z}` : '',
-    ].filter(Boolean).join(' · ');
-  }
+  const drzewo = dane.rozdzielnie.map((r) => kafelek('rozdzielnie', r, new Set())).join('');
+  // elementy, do których nie doszło drzewo — bez zasilania w bazie (albo źródło wpisane tekstem spoza bazy)
+  const grupy = [
+    ['poleRozdzielcze', 'Pola bez rozdzielni'],
+    ['transformatory', 'Transformatory bez zasilania'],
+    ['urzadzenia', 'Wyłączniki i odbiorniki bez zasilania'],
+    ['kb', 'Kombajny bez zasilania'],
+    ['maszyny', 'Maszyny bez zasilania'],
+    ['przenosniki', 'Napędy bez zasilania'],
+    ['silniki', 'Silniki nieprzypisane do maszyny'],
+    ['czujniki', 'Czujniki nieprzypisane'],
+  ].map(([st, tytul]) => {
+    const recs = dane[st].filter((r) => !uzyte.has(klucz(st, r)));
+    if (!recs.length) return '';
+    return `<li class="dash-node"><div class="dash-node-row"><span class="dash-node-label">${esc(tytul)} (${recs.length})</span></div><ul class="dash-children">${recs.map((r) => kafelek(st, r, new Set())).join('')}</ul></li>`;
+  }).join('');
 
-  function renderPoleFor(rozdzielniaRecord) {
-    return poleRozdzielcze
-      .filter((p) => wskazujeNa(p.miejsce_zabudowy, rozdzielniaRecord, 'nazwa_r'))
-      .map((p) => {
-        usedIds.poleRozdzielcze.add(p.id);
-        return node(
-          p.p_nazwa,
-          { meta: metaPola(p), entityKey: 'poleRozdzielcze', id: p.id },
-          renderTransformatoryFor(p) + renderUrzadzeniaFor('poleRozdzielcze', p)
-        );
-      })
-      .join('');
-  }
+  container.innerHTML = `
+    <div class="dash-pasek">
+      ${onDodaj ? '<button type="button" class="btn-small btn-primary" data-dodaj-rozdzielnie="1">+ Dodaj rozdzielnię</button>' : ''}
+      <span class="field-hint">Kafelki to rekordy z Bazy urządzeń, ułożone wg pól „zasilany z” — te same połączenia co na Planie rejonu. Kliknij kafelek, żeby go edytować; „+ dodaj” — nowy element zasilany z tego kafelka.</span>
+    </div>
+    ${drzewo ? `<div class="dash-rejon"><ul class="dash-tree">${drzewo}</ul></div>` : ''}
+    ${grupy ? `<div class="dash-rejon dash-orphans"><h3>Niepowiązane / do sprawdzenia</h3><p class="field-hint">Te rekordy nie mają zasilania w bazie (albo źródło wpisano tekstem, który nie pasuje do żadnego rekordu). Kliknij, żeby poprawić.</p><ul class="dash-tree">${grupy}</ul></div>` : ''}
+    ${!drzewo && !grupy ? '<p class="empty-state">Brak danych — dodaj rozdzielnię przyciskiem wyżej, w Bazie urządzeń albo przez import w Synchronizacji.</p>' : ''}
+  `;
 
-  const rozdzielnieHtml = rozdzielnie
-    .map((r) => {
-      const children = renderPoleFor(r);
-      return node(
-        `Rozdzielnia: ${r.nazwa_r}`,
-        { meta: r.pole_nr ? `pole nr ${r.pole_nr}` : '', entityKey: 'rozdzielnie', id: r.id },
-        children
-      );
-    })
-    .join('');
-
-  // Rekordy, których nic nie dopasowało do drzewa — nie chowamy ich, bo
-  // dopasowanie po wolnym tekście (opcja "inny, wpisz ręcznie") nie jest
-  // prawdziwym kluczem obcym. Każda grupa zna swój entityKey, żeby te węzły
-  // też były klikalne.
-  const orphanGroups = [
-    { label: 'Pola rozdzielcze', entityKey: 'poleRozdzielcze', records: poleRozdzielcze.filter((r) => !usedIds.poleRozdzielcze.has(r.id)), titleField: 'p_nazwa' },
-    { label: 'Transformatory', entityKey: 'transformatory', records: transformatory.filter((r) => !usedIds.transformatory.has(r.id)), titleField: 't_nr' },
-    { label: 'Urządzenia', entityKey: 'urzadzenia', records: urzadzenia.filter((r) => !usedIds.urzadzenia.has(r.id)), titleField: 'nazwa' },
-    { label: 'KB', entityKey: 'kb', records: kb.filter((r) => !usedIds.kb.has(r.id)), titleField: 'kb_nazwa' },
-    { label: 'Maszyny', entityKey: 'maszyny', records: maszyny.filter((r) => !usedIds.maszyny.has(r.id)), titleField: 'm_nazwa' },
-    { label: 'Silniki (nieprzypisane do żadnej maszyny)', entityKey: 'silniki', records: silniki.filter((r) => !usedIds.silniki.has(r.id) && ![...urzadzenia, ...maszyny, ...kb].some((x) => Array.isArray(x.silniki) && x.silniki.includes(r.id))), titleField: 'nazwa_silnika' },
-    { label: 'Czujniki (nieprzypisane do żadnego KB)', entityKey: 'czujniki', records: czujniki.filter((r) => !usedIds.czujniki.has(r.id)), titleField: 'nazwa_czujnik' },
-  ].filter((g) => g.records.length > 0);
-
-  const orphansHtml = orphanGroups.length
-    ? `
-      <div class="dash-rejon dash-orphans">
-        <h3>Niepowiązane / do sprawdzenia</h3>
-        <p class="field-hint">Te rekordy nie dopasowały się automatycznie do żadnego węzła drzewa (np. pole "Miejsce zabudowy"/"Zasilany z" wpisane ręcznie nie zgadza się dokładnie z nazwą). Kliknij, żeby poprawić — albo uruchom samonaprawę w ustawieniach.</p>
-        <ul class="dash-tree">
-          ${orphanGroups
-            .map(
-              (group) => `
-              <li class="dash-node">
-                <div class="dash-node-row"><span class="dash-node-label">${escapeHtml(group.label)} (${group.records.length})</span></div>
-                <ul class="dash-children">
-                  ${group.records
-                    .map((r) => node(r[group.titleField] || '(bez nazwy)', { entityKey: group.entityKey, id: r.id }))
-                    .join('')}
-                </ul>
-              </li>
-            `
-            )
-            .join('')}
-        </ul>
-      </div>
-    `
-    : '';
-
-  const rejonySections = rozdzielnieHtml
-    ? `<div class="dash-rejon"><ul class="dash-tree">${rozdzielnieHtml}</ul></div>`
-    : '';
-
-  container.innerHTML =
-    rejonySections || orphansHtml
-      ? rejonySections + orphansHtml
-      : '<p class="empty-state">Brak danych do pokazania — dodaj rekordy w zakładce Rejon.</p>';
-
+  container.querySelector('[data-dodaj-rozdzielnie]')?.addEventListener('click', () => onDodaj('rozdzielnie', {}));
+  container.querySelectorAll('.dash-dodaj').forEach((sel) => {
+    sel.addEventListener('click', (e) => e.stopPropagation());
+    sel.addEventListener('change', () => {
+      const [store, id] = sel.dataset.dodaj.split(':');
+      const rec = dane[store].find((r) => r.id === Number(id));
+      const [tab, , pole, stale] = (DODAJ[rodzajRek(store, rec)] || [])[Number(sel.value)] || [];
+      sel.value = '';
+      if (tab) onDodaj(tab, { [pole]: Number(id), ...(stale || {}) });
+    });
+  });
   container.querySelectorAll('.dash-plan-btn').forEach((b) => {
-    if (!onShowOnPlan) { b.remove(); return; }
     b.addEventListener('click', (event) => {
       event.stopPropagation();
       const [store, id] = b.dataset.plan.split(':');
       onShowOnPlan(store, Number(id));
     });
   });
-
   if (onEditRecord) {
     container.querySelectorAll('.dash-clickable').forEach((el) => {
-      el.addEventListener('click', (event) => {
-        if (event.target.closest('.dash-plan-btn')) return;
+      const otworz = (event) => {
+        if (event.target.closest('.dash-plan-btn, .dash-dodaj')) return;
         onEditRecord(el.dataset.entity, Number(el.dataset.id));
-      });
+      };
+      el.addEventListener('click', otworz);
       el.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
-          onEditRecord(el.dataset.entity, Number(el.dataset.id));
+          otworz(event);
         }
       });
     });

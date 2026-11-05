@@ -340,11 +340,11 @@ export function createCrudModule({ entities, examples = {}, tabsId, listId, form
     });
   }
 
-  async function openForm(id) {
+  async function openForm(id, preset = {}) {
     editingId = id ?? null;
     const def = aktDef();
 
-    let record = { ...(tab().stale || {}) };
+    let record = { ...(tab().stale || {}), ...(id ? {} : preset) };
     if (editingId) {
       const all = await nadzorGetAll(currentEntity);
       record = all.find((r) => r.id === editingId) || {};
@@ -524,5 +524,16 @@ export function createCrudModule({ entities, examples = {}, tabsId, listId, form
     await openForm(id);
   }
 
-  return { init, refresh, editRecord };
+  // 06.11.2026: nowy rekord z zewnątrz (kafelek Układu zasilania „+ dodaj”) — zakładka + wpisane źródło zasilania
+  async function nowyRekord(tabKey, preset = {}) {
+    const t = zakladki.find((x) => x.key === tabKey) || zakladki.find((x) => x.entity === tabKey);
+    if (!t) return;
+    currentTab = t.key;
+    currentEntity = t.entity;
+    renderTabs();
+    await renderList();
+    await openForm(null, preset);
+  }
+
+  return { init, refresh, editRecord, nowyRekord };
 }

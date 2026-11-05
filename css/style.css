@@ -973,3 +973,9 @@ body.plan-pelny-body { overflow: hidden; }
 .dash-plan-btn:hover { background: #eceff1; }
 .dash-node-row.dash-wskaz { outline: 3px solid #e65100; outline-offset: 1px; }
 .plan-wskaz { pointer-events: none; }
+
+/* 06.11.2026: Układ zasilania — kafelki z „+ dodaj” */
+.dash-pasek { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin: 0.4rem 0 0.8rem; }
+.dash-rodzaj { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; color: #607d8b; margin-right: 0.25rem; }
+.dash-dodaj { margin-left: auto; font-size: 0.78rem; padding: 1px 4px; border: 1px solid #90a4ae; border-radius: 10px; background: #fff; color: #263238; cursor: pointer; max-width: 9.5rem; }
+.dash-dodaj + .dash-plan-btn { margin-left: 0.3rem; }
