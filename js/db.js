@@ -400,6 +400,7 @@ export async function exportAllData(label) {
     },
     nadzor,
     wiedza,
+    katalogAparatow: (await getMeta('katalog_aparatow')) || null, // 05.11.2026: typy aparatów z napięciem
   };
 }
 
@@ -410,6 +411,10 @@ export async function exportAllData(label) {
 // potem podmiana odwołań (fk-or-free: liczba = id, tekst zostaje; fk-multi: lista id).
 export async function importAllData(data, entities = null) {
   const summary = { dodaneNadzor: 0, dodaneWiedza: 0, pominieteWiedza: 0, przepietePowiazania: 0, bezCelu: 0 };
+  if (Array.isArray(data.katalogAparatow)) {
+    const { polaczKatalog } = await import('./katalog-aparatow.js');
+    summary.typyAparatow = await polaczKatalog(data.katalogAparatow);
+  }
 
   if (data.nadzor) {
     const mapa = {}; // store -> Map(stareId -> noweId)

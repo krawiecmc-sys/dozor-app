@@ -2,7 +2,7 @@
 // zero zasięgu) — NIE network-first, bo próba połączenia i czekanie na
 // timeout dawałoby zauważalne opóźnienia przy każdym starcie.
 
-const CACHE_NAME = 'dozor-app-v36';
+const CACHE_NAME = 'dozor-app-v37';
 
 const APP_SHELL = [
   './',
@@ -25,6 +25,7 @@ const APP_SHELL = [
   './js/graph-view.js',
   './js/plan-view.js',
   './js/symbole.js',
+  './js/katalog-aparatow.js',
   './js/import-excel.js',
   './js/import-schemat.js',
   './js/vendor/xlsx.full.min.js',

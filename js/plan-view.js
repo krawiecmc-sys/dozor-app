@@ -20,6 +20,7 @@
 import { nadzorGetAll, nadzorUpdate, nadzorAdd, nadzorDelete } from './db.js';
 import { NADZOR_ENTITIES, U_RODZAJE } from './nadzor-entities.js';
 import { KOLOR, kolorNapiecia, kv, symbolSvg, napiecieRekordu, napieciaWtorne, rowneKV } from './symbole.js';
+import { wczytajKatalog, zapiszKatalog, typAparatu, NAPIECIA_KATALOGU } from './katalog-aparatow.js';
 
 const OBIEKTY = [
   { store: 'rozdzielnie', label: 'Rozdzielnia', title: 'nazwa_r', symbol: 'rozdzielnia' },
@@ -120,6 +121,7 @@ export function createPlanView(containerId) {
   let onShowInMap = null;
   let dane = {};
   let geo = new Map(); // chodnik.id -> geometria w metrach
+  let katalog = []; // typy aparatów z napięciem (katalog-aparatow.js)
   let widok = { s: 1.6, tx: 40, ty: 60, dopasowany: false }; // px = m * s + t
   // 03.11.2026: wielkość symboli (Piotr: "nieczytelne, zmniejsz ikony") — domyślnie średnie (0,65 dawnych)
   const SKALE = { male: 0.5, srednie: 0.65, duze: 0.9 };
@@ -193,6 +195,7 @@ export function createPlanView(containerId) {
     const magazyny = ['chodniki', 'przenosniki', 'rozdzielnie', 'poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb'];
     const wyniki = await Promise.all(magazyny.map((m) => nadzorGetAll(m)));
     dane = Object.fromEntries(magazyny.map((m, i) => [m, wyniki[i]]));
+    katalog = await wczytajKatalog();
     zbudujGeometrie();
   }
 
@@ -707,6 +710,28 @@ export function createPlanView(containerId) {
     `;
   }
 
+  function blokKatalogu() {
+    const wiersze = katalog.map((w, i) => `<li><b>${esc(w.typ)}</b>: ${esc(w.nap.join(' / '))} — <i>${w.zrodlo ? esc(w.zrodlo) : '<span style="color:#c62828">bez źródła w dokumentacji</span>'}</i> <button type="button" class="btn-small" data-katalog-usun="${i}">Usuń</button></li>`).join('');
+    return `<details class="plan-brak plan-katalog"><summary>Katalog typów aparatów — napięcia (${katalog.length})</summary>
+      <p class="field-hint">Typ rozpoznawany po początku nazwy urządzenia (np. „WSN-40P/1” pasuje do „WSN-40P/1 nr 5”). Przy dodawaniu napięcie ustawi się samo, a złe napięcie trafi do niezgodnych. Typy dostępne na każde napięcie nie muszą być wpisane. Napięcia wpisuj tylko z dokumentacji urządzenia (DTR, tabliczka znamionowa, karta producenta) i podaj źródło.</p>
+      <ul>${wiersze || '<li>pusty</li>'}</ul>
+      <div class="plan-katalog-dodaj"><input type="text" data-katalog-typ placeholder="typ, np. WSN-40P/1">
+        ${NAPIECIA_KATALOGU.map((n) => `<label><input type="checkbox" data-katalog-nap value="${n}"> ${n}</label>`).join(' ')}
+        <input type="text" data-katalog-zrodlo placeholder="źródło, np. DTR str. 4 / tabliczka"> <button type="button" class="btn-small" data-katalog-dodaj="1">Dodaj typ</button></div>
+    </details>`;
+  }
+
+  async function zmienKatalog(fn) {
+    const otwarty = brakiEl.querySelector('.plan-katalog')?.open;
+    const k = await wczytajKatalog();
+    fn(k);
+    await zapiszKatalog(k);
+    katalog = k;
+    render();
+    const d = brakiEl.querySelector('.plan-katalog');
+    if (d && otwarty) d.open = true;
+  }
+
   function renderBraki(w) {
     const bezPolozenia = [];
     for (const def of OBIEKTY) {
@@ -720,6 +745,8 @@ export function createPlanView(containerId) {
     const chodnikiBraki = [...geo.values()].filter((g) => g.brakDanych);
     const niezgodne = w.kable.map((k) => ({ k, pow: problemyPolaczenia(k, w.kable) })).filter((x) => x.pow.length);
     const doSprawdzenia = kilkaOdplywow(w.kable);
+    const zasilaneUrz = new Set(w.kable.filter((k) => k.cel.store === 'urzadzenia').map((k) => k.cel.rec.id));
+    const zlyTyp = (dane.urzadzenia || []).filter((r) => !zasilaneUrz.has(r.id)).map((r) => ({ rec: r, pow: problemTypu('urzadzenia', r) })).filter((x) => x.pow);
     const nazwa = (store, rec) => {
       const d = OBIEKTY.find((o) => o.store === store);
       if (store === 'przenosniki') return `przenośnik ${rec.pr_nr}`;
@@ -733,11 +760,13 @@ export function createPlanView(containerId) {
       blok('Przenośniki bez chodnika', przenBez.map((rec) => `<li>${esc(nazwa('przenosniki', rec))} <button type="button" class="btn-small" data-edytuj="przenosniki:${rec.id}">Edytuj</button></li>`)),
       blok('Połączenia bez opisu kabla', bezKabla.map((k) => `<li>${esc(nazwa(k.zrodlo.store, k.zrodlo.rec))} → ${esc(nazwa(k.cel.store, k.cel.rec))}${k.prefiks === 'kabel_rez' ? ' (rezerwowe)' : ''} <button type="button" class="btn-small" data-edytuj="${k.cel.store}:${k.cel.rec.id}">Uzupełnij kabel</button></li>`)),
       blok('Połączenia niezgodne z układem zasilania', niezgodne.map(({ k, pow }) => `<li>${esc(nazwa(k.zrodlo.store, k.zrodlo.rec))} → ${esc(nazwa(k.cel.store, k.cel.rec))}: ${esc(pow.join('; '))} <button type="button" class="btn-small" data-zasilanie="${k.cel.store}:${k.cel.rec.id}">Zmień zasilanie</button></li>`)),
+      blok('Urządzenia z napięciem niezgodnym z typem', zlyTyp.map(({ rec, pow }) => `<li>${esc(nazwa('urzadzenia', rec))}: ${esc(pow)} <button type="button" class="btn-small" data-edytuj="urzadzenia:${rec.id}">Edytuj</button></li>`)),
       blok('Do sprawdzenia: wyłącznik z kilkoma odpływami do urządzeń końcowych (zwykle jeden)', doSprawdzenia.map(({ rec, cele }) => `<li>${esc(nazwa('urzadzenia', rec))} → ${esc(cele.join(', '))}</li>`)),
       blok('Kable nienarysowane (jeden z końców bez położenia)', niewidoczne.map((k) => `<li>${esc(nazwa(k.zrodlo.store, k.zrodlo.rec))} → ${esc(nazwa(k.cel.store, k.cel.rec))}</li>`)),
       blok('Zasilanie wpisane tekstem, spoza bazy', w.spozaBazy.map((s) => `<li>${esc(nazwa(s.store, s.rec))}: „${esc(s.opis)}” <button type="button" class="btn-small" data-edytuj="${s.store}:${s.rec.id}">Edytuj</button></li>`)),
       blok('Chodniki bez kierunku lub długości (przyjęto 90° / 100 m)', chodnikiBraki.map((g) => `<li>${esc(g.rec.ch_nazwa)} <button type="button" class="btn-small" data-edytuj="chodniki:${g.rec.id}">Edytuj</button></li>`)),
     ].join('') || '<p class="field-hint">Wszystkie obiekty mają położenie, a połączenia — opis kabla.</p>';
+    brakiEl.insertAdjacentHTML('beforeend', blokKatalogu());
   }
 
   // ---------- karta obiektu / kabla ----------
@@ -918,12 +947,23 @@ export function createPlanView(containerId) {
     if (!zgodnePolaczenie(p)) pow.push(powodNiezgodnosci(p));
     const n = problemNapiecia(p);
     if (n) pow.push(n);
+    const t = problemTypu(p.cel.store, p.cel.rec);
+    if (t) pow.push(t);
     if (p.zrodlo.store === 'transformatory' && rodzajPolaczenia(p) === 'przelot') {
       const lista = przelotyPierwotne(p.zrodlo.rec.id, pol);
       const i = lista.findIndex((q) => q.cel.store === p.cel.store && q.cel.rec.id === p.cel.rec.id);
       if (lista.length > 1 && i > 0) pow.push('transformator ma po stronie pierwotnej tylko dwa przyłącza: zasilanie i jeden przelot');
     }
     return pow;
+  }
+
+  // typ aparatu z katalogu pracuje tylko na wybranych napięciach (np. WSN-40P/1 — tylko 0,5 kV)
+  function problemTypu(store, rec) {
+    if (store !== 'urzadzenia') return null;
+    const w = typAparatu(rec.nazwa, katalog);
+    const v = kv(rec.nap_zas);
+    if (!w || v === null || w.nap.some((x) => rowneKV(kv(x), v))) return null;
+    return `typ ${w.typ} pracuje tylko na ${w.nap.join(' / ')}, a wpisano ${fmtKV(v)}`;
   }
 
   function kilkaOdplywow(pol) {
@@ -946,17 +986,28 @@ export function createPlanView(containerId) {
     return o && o.length ? o.map(fmtKV) : null;
   }
 
+  // napięcia do wyboru: część wspólna tego, co daje źródło, i tego, na czym pracuje typ aparatu z katalogu
+  function napieciaDoWyboru(rodzajId, wartoscZrodla, celRec, nazwa) {
+    const wgZrodla = opcjeNapieciaFormularza(rodzajId, wartoscZrodla, celRec);
+    const w = ['wylacznik', 'odbiornik'].includes(rodzajId) ? typAparatu(nazwa, katalog) : null;
+    const baza = wgZrodla || NAP_URZ.opcje;
+    if (!w) return { opcje: baza, uwaga: wgZrodla && wgZrodla.length > 1 ? 'Transformator dwunapięciowy — wybierz stronę wtórną.' : wgZrodla ? 'Napięcie wynika ze źródła.' : '' };
+    const wspolne = baza.filter((o) => w.nap.some((x) => rowneKV(kv(x), kv(o))));
+    if (wspolne.length) return { opcje: wspolne, uwaga: `Typ ${w.typ}: ${w.nap.join(' / ')}${wgZrodla ? ', zgodnie ze źródłem' : ''}.` };
+    return { opcje: w.nap, uwaga: `Uwaga: typ ${w.typ} pracuje tylko na ${w.nap.join(' / ')}, a źródło daje ${wgZrodla.join(' / ')} — zmień źródło.` };
+  }
+
   function odswiezNapiecie(rodzajId, celRec = null, domyslneZrodlo = '') {
     const sel = dodajEl.querySelector('[name="napiecie"]');
     if (!sel) return;
     let zr = dodajEl.querySelector('[name="zrodlo"]')?.value || '';
     if (zr === '__bez_zmian') zr = domyslneZrodlo;
-    const wgZrodla = opcjeNapieciaFormularza(rodzajId, zr, celRec);
-    const opcje = wgZrodla || NAP_URZ.opcje;
+    const nazwa = dodajEl.querySelector('[name="nazwa"]')?.value ?? celRec?.nazwa ?? '';
+    const { opcje, uwaga } = napieciaDoWyboru(rodzajId, zr, celRec, nazwa);
     const teraz = sel.value || (celRec ? fmtKV(kv(celRec.nap_zas)) : '');
     sel.innerHTML = opcje.map((o) => `<option ${o === teraz ? 'selected' : ''}>${o}</option>`).join('');
     const uw = dodajEl.querySelector('[data-uwaga-napiecia]');
-    if (uw) uw.textContent = wgZrodla && wgZrodla.length > 1 ? 'Transformator dwunapięciowy — wybierz stronę wtórną.' : wgZrodla ? 'Napięcie wynika ze źródła.' : '';
+    if (uw) uw.textContent = uwaga;
   }
 
   // źródło zasilania głównego rekordu (pierwsze rozpoznane pole "zasilany z")
@@ -1223,6 +1274,9 @@ export function createPlanView(containerId) {
       }
     }
   });
+  dodajEl.addEventListener('input', (e) => {
+    if (dodajEl.dataset.tryb === 'dodaj' && e.target.name === 'nazwa') odswiezNapiecie(dodajEl.querySelector('[name="rodzaj"]').value);
+  });
   dodajEl.addEventListener('submit', (e) => {
     e.preventDefault();
     if (dodajEl.dataset.tryb === 'zasilanie') zapiszZasilanie();
@@ -1375,6 +1429,20 @@ export function createPlanView(containerId) {
       await usunPrzyklad();
       await wczytajDane();
       render();
+    }
+    if (t.dataset.katalogUsun !== undefined) {
+      const i = Number(t.dataset.katalogUsun);
+      if (confirm(`Usunąć typ ${katalog[i]?.typ} z katalogu?`)) await zmienKatalog((k) => k.splice(i, 1));
+    }
+    if (t.dataset.katalogDodaj) {
+      const typ = String(brakiEl.querySelector('[data-katalog-typ]')?.value || '').trim();
+      const nap = [...brakiEl.querySelectorAll('[data-katalog-nap]:checked')].map((x) => x.value);
+      const zrodlo = String(brakiEl.querySelector('[data-katalog-zrodlo]')?.value || '').trim();
+      if (!typ || !nap.length || !zrodlo) { alert('Podaj typ, zaznacz napięcie i wpisz źródło z dokumentacji (DTR, tabliczka, karta producenta).'); return; }
+      await zmienKatalog((k) => {
+        const i = k.findIndex((x) => x.typ.toUpperCase().replace(/[\s_-]/g, '') === typ.toUpperCase().replace(/[\s_-]/g, ''));
+        if (i >= 0) Object.assign(k[i], { nap, zrodlo }); else k.push({ typ, nap, zrodlo });
+      });
     }
     if (t.dataset.edytuj && onEditRecord) {
       const [store, id] = t.dataset.edytuj.split(':');
@@ -1571,5 +1639,5 @@ export function createPlanView(containerId) {
     return true;
   }
 
-  return { init, pokaz, _test: { zrodlaDla, odplywyDla, zgodnePolaczenie, problemyPolaczenia, rodzajPolaczenia, opcjeNapieciaFormularza, napiecieEfektywne, kilkaOdplywow, polaczenia: () => polaczenia().wynik, wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
+  return { init, pokaz, _test: { problemTypu, napieciaDoWyboru, katalog: () => katalog, zrodlaDla, odplywyDla, zgodnePolaczenie, problemyPolaczenia, rodzajPolaczenia, opcjeNapieciaFormularza, napiecieEfektywne, kilkaOdplywow, polaczenia: () => polaczenia().wynik, wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
 }

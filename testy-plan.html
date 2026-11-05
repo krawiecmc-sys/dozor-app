@@ -256,6 +256,20 @@ try {
   ok(T.rodzajPolaczenia(P('Pompa-8')) === 'odplyw' && T.rodzajPolaczenia(P('W-przelot')) === 'przelot' && T.rodzajPolaczenia(P('W-05')) === 'zasilanie' && T.rodzajPolaczenia(P('PRZ-8a')) === 'przelot', 'rodzaje linii: odpływ do urządzenia końcowego, przelot, zasilanie');
   ok(T.kilkaOdplywow(pol8).some((w) => w.rec.id === W05 && w.cele.length === 2), 'do sprawdzenia: wyłącznik z dwoma odpływami do urządzeń końcowych');
   ok(T.zrodlaDla('odbiornik').every((o) => !o.wartosc.includes(`|urzadzenia|${O1}`)), 'urządzenie końcowe nie jest źródłem zasilania');
+  // 9) Katalog typów aparatów (05.11.2026): WSN-40P/1 tylko 0,5 kV, OSWCA 0,5 i 1 kV, źródło przy wpisie
+  const kat = T.katalog();
+  ok(kat.length === 2 && kat.every((w) => w.zrodlo), 'katalog początkowy: 2 typy od Piotra, każdy ze źródłem');
+  const W40 = await db.nadzorAdd('urzadzenia', { nazwa: 'WSN-40P/1 nr 7', u_rodzaj: U_RODZ[0], nap_zas: '1 kV', zasilane_z_transformatora: t1_8.id });
+  const OSW = await db.nadzorAdd('urzadzenia', { nazwa: 'OSWCA-9', u_rodzaj: U_RODZ[0], nap_zas: '0,5 kV', zasilane_z_transformatora: T8 });
+  await plan.init({});
+  const pol9 = T.polaczenia();
+  const pow9 = (id) => T.problemyPolaczenia(pol9.find((p) => p.cel.store === 'urzadzenia' && p.cel.rec.id === id), pol9).join(' | ');
+  ok(pow9(W40).includes('typ WSN-40P/1 pracuje tylko na 0,5 kV') && pow9(OSW) === '', `typ: WSN-40P/1 na 1 kV niezgodny, OSWCA na 0,5 kV zgodna (${pow9(W40)})`);
+  const d1 = T.napieciaDoWyboru('wylacznik', `zasilane_z_transformatora|transformatory|${T8}`, null, 'WSN-40P/1');
+  const d2 = T.napieciaDoWyboru('wylacznik', `zasilane_z_transformatora|transformatory|${t1_8.id}`, null, 'WSN-40P/1');
+  ok(JSON.stringify(d1.opcje) === '["0,5 kV"]' && d2.uwaga.includes('zmień źródło'), 'formularz: WSN-40P/1 z dwunapięciowego tylko 0,5 kV; z trafo 6/1 kV ostrzeżenie');
+  const eksp9 = await db.exportAllData('t9');
+  ok(Array.isArray(eksp9.katalogAparatow) || eksp9.katalogAparatow === null, 'eksport zawiera pole katalogu aparatów');
   window.__niezgodne = [...document.querySelectorAll('#plan-braki details')].find((d) => d.textContent.includes('niezgodne'))?.textContent || '';
   window.__gotowe = true;
 } catch (e) {
