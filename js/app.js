@@ -287,6 +287,7 @@ sectionSwitchEl.addEventListener('click', async (event) => {
   btn.classList.add('active');
 
   const active = btn.dataset.section;
+  try { sessionStorage.setItem('protektor-sekcja', active); } catch {}
   for (const [name, el] of Object.entries(sectionEls)) {
     el.classList.toggle('hidden', name !== active);
   }
@@ -388,6 +389,7 @@ function switchNadzorSub(subName) {
   });
 
   nadzorActiveSub = subName;
+  try { sessionStorage.setItem('protektor-sub', subName); } catch {}
   for (const [name, el] of Object.entries(nadzorSubAreas)) {
     el.classList.toggle('hidden', name !== nadzorActiveSub);
   }
@@ -409,7 +411,16 @@ async function init() {
   await initNadzor();
   await initOugWug();
   await initDiagnostyka();
+  // 06.11.2026: po odświeżeniu wróć do ostatnio otwartej zakładki
+  try {
+    const sub = sessionStorage.getItem('protektor-sub');
+    if (sub && nadzorSubAreas[sub]) switchNadzorSub(sub);
+  } catch {}
   await refreshActiveNadzorSub(); // domyślny widok startowy to Dashboard
+  try {
+    const sekcja = sessionStorage.getItem('protektor-sekcja');
+    if (sekcja && sekcja !== 'dashboard') document.querySelector(`#section-switch [data-section="${sekcja}"]`)?.click();
+  } catch {}
 
   initSync({
     onImported: async () => {
@@ -445,4 +456,4 @@ exportReminderDismissBtn.addEventListener('click', () => {
   exportReminderEl.classList.add('hidden');
 });
 
-init();
+init().then(() => { window.__protektorGotowy = true; });

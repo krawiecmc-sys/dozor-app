@@ -28,6 +28,13 @@
   <input id="search" type="search" class="hidden" placeholder="Szukaj (tytuł, treść, tagi)..." autocomplete="off">
 </header>
 
+<div id="nowa-wersja" class="export-reminder hidden">
+  <span class="export-reminder-text">Jest nowa wersja PROTEKTORA. Zapisz to, co edytujesz, i odśwież.</span>
+  <div class="export-reminder-actions">
+    <button id="nowa-wersja-btn" class="btn-small">Odśwież</button>
+  </div>
+</div>
+
 <div id="export-reminder" class="export-reminder hidden">
   <span class="export-reminder-text"></span>
   <div class="export-reminder-actions">
@@ -157,13 +164,32 @@
   // ta rejestracja i tak się wykona i appka sama się naprawi po jednym
   // automatycznym przeładowaniu, zamiast trwać zablokowana bez wyjścia.
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./service-worker.js').catch((err) => {
+    // 06.11.2026: nowa wersja nie przeładowuje strony sama w trakcie pracy — pokazuje pasek „Odśwież”.
+    // Samonaprawa zostaje: jeśli appka nie wystartuje w 8 s, a czeka nowsza wersja, włącza się ona sama.
+    let odswiezNaProsbe = false;
+    const pasek = document.getElementById('nowa-wersja');
+    const wlacz = (sw) => { odswiezNaProsbe = true; sw.postMessage('SKIP_WAITING'); };
+    navigator.serviceWorker.register('./service-worker.js').then((reg) => {
+      const pokaz = (sw) => {
+        if (!navigator.serviceWorker.controller) return;
+        pasek.classList.remove('hidden');
+        document.getElementById('nowa-wersja-btn').onclick = () => wlacz(sw);
+      };
+      if (reg.waiting) pokaz(reg.waiting);
+      reg.addEventListener('updatefound', () => {
+        const nowy = reg.installing;
+        if (nowy) nowy.addEventListener('statechange', () => { if (nowy.state === 'installed') pokaz(nowy); });
+      });
+      setInterval(() => reg.update().catch(() => {}), 30 * 60 * 1000);
+      setTimeout(() => { if (!window.__protektorGotowy && reg.waiting) wlacz(reg.waiting); }, 8000);
+    }).catch((err) => {
       console.error('Rejestracja Service Workera nie powiodła się:', err);
     });
 
     let reloadedOnce = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (reloadedOnce) return;
+      // tylko po kliknięciu „Odśwież” (albo samonaprawie); pierwsze uruchomienie i aktualizacja w tle nie przeładowują
+      if (reloadedOnce || !odswiezNaProsbe) return;
       reloadedOnce = true;
       window.location.reload();
     });

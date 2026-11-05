@@ -2,7 +2,7 @@
 // zero zasięgu) — NIE network-first, bo próba połączenia i czekanie na
 // timeout dawałoby zauważalne opóźnienia przy każdym starcie.
 
-const CACHE_NAME = 'dozor-app-v51';
+const CACHE_NAME = 'dozor-app-v52';
 
 const APP_SHELL = [
   './',
@@ -28,6 +28,7 @@ const APP_SHELL = [
   './js/siec-zasilania.js',
   './js/import-excel.js',
   './js/import-schemat.js',
+  './js/export-reminder.js',
   './js/vendor/xlsx.full.min.js',
   './data/seed-data.js',
   './icons/icon.svg',
@@ -35,9 +36,16 @@ const APP_SHELL = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
+    // 06.11.2026: cache: 'reload' — pliki prosto z serwera, z pominięciem pamięci HTTP przeglądarki (GitHub Pages trzyma
+    // pliki do 10 min); bez tego nowa wersja mogła dostać część starych plików (Piotr: „mieszają się wersje”)
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL.map((u) => new Request(u, { cache: 'reload' }))))
   );
-  self.skipWaiting();
+  // 06.11.2026: bez samoczynnego skipWaiting — nowa wersja czeka, aż użytkownik kliknie „Odśwież” na pasku
+  // (wcześniej strona przeładowywała się sama w trakcie pracy, np. przy klikaniu po zakładkach)
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
