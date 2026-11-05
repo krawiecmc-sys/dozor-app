@@ -292,11 +292,12 @@ export function createPlanView(containerId, ustawienia = {}) {
   }
 
   // ---------- układ schematu (Graf zasilania) ----------
-  // Drzewo: rozdzielnia → pola → transformatory → wyłączniki → odbiorniki końcowe / KB / napędy. Rodzic = źródło
-  // zasilania (pole: rozdzielnia, w której jest). Przelot (to samo piętro, np. trafo → trafo) stoi obok, na tym samym
-  // poziomie. Elementy bez zasilania stają na poziomie swojego rodzaju. Jednostki "świata" jak na planie.
-  const SCH_DX = 70;
-  const SCH_DY = 80;
+  // Drzewo wierszowe (05.11.2026, Piotr: "graf nieczytelny"): każdy element w swoim wierszu, poziom sieci = wcięcie
+  // (rozdzielnia → pola → transformatory → wyłączniki → odbiorniki końcowe / KB / maszyny / napędy); nazwa obok symbolu
+  // nic nie zasłania, bo elementy zasilane stoją w kolejnych wierszach. Rodzic = źródło zasilania (pole: rozdzielnia).
+  // Przelot (trafo → trafo, pole → pole) — ten sam poziom, pod całą gałęzią poprzednika. Jednostki "świata".
+  const SCH_DX = 40;
+  const SCH_DY = 34;
   const POZIOM_RODZAJU = { rozdzielnie: 0, poleRozdzielcze: 1, transformatory: 2, wylacznik: 3, odbiornik: 4, kb: 4, maszyny: 4, przenosniki: 4 };
   const MAGAZYNY_SCHEMATU = ['rozdzielnie', 'poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb', 'maszyny', 'przenosniki'];
   let schCache = null;
@@ -337,25 +338,21 @@ export function createPlanView(containerId, ustawienia = {}) {
     for (const w of wezly.values()) w.dzieci.sort((a, b) => Number(maKB(a)) - Number(maKB(b)));
     korzenie.sort((a, b) => poziomRodz(a) - poziomRodz(b) || Number(maKB(a)) - Number(maKB(b)));
     const uklad = new Map();
-    let kolumna = 0;
+    let wiersz = 0;
     const odwiedzone = new Set();
     const umiesc = (k, poziom) => {
-      if (odwiedzone.has(k)) return null;
+      if (odwiedzone.has(k)) return;
       odwiedzone.add(k);
       const w = wezly.get(k);
-      const xs = w.dzieci.map((d) => umiesc(d, poziom + 1)).filter((x) => x !== null);
-      const x = xs.length ? (Math.min(...xs) + Math.max(...xs)) / 2 : kolumna++ * SCH_DX;
-      uklad.set(k, { x, y: poziom * SCH_DY });
+      uklad.set(k, { x: poziom * SCH_DX, y: wiersz++ * SCH_DY, poziom });
+      for (const d of w.dzieci) umiesc(d, poziom + 1);
       for (const pk of w.przeloty) umiesc(pk, poziom);
-      return x;
     };
     for (const k of korzenie) {
       if (odwiedzone.has(k)) continue;
       umiesc(k, poziomRodz(k));
-      kolumna += 1; // odstęp między gałęziami
+      wiersz += 0.5; // odstęp między sieciami
     }
-    const ostatni = Math.max(0, ...[...uklad.entries()].filter(([k]) => !k.startsWith('kb:')).map(([, q]) => q.y));
-    for (const [k, q] of uklad) if (k.startsWith('kb:') && q.y < ostatni + SCH_DY) q.y = ostatni + SCH_DY;
     schCache = { dane, uklad };
     schKlucz = kluczStanu;
     return uklad;
@@ -365,7 +362,7 @@ export function createPlanView(containerId, ustawienia = {}) {
     if (SCHEMAT) {
       const u = [...ukladSchematu().values()];
       if (!u.length) return { minX: 0, minY: 0, maxX: 300, maxY: 200 };
-      return { minX: Math.min(...u.map((q) => q.x)), minY: Math.min(...u.map((q) => q.y)), maxX: Math.max(...u.map((q) => q.x)) + 60, maxY: Math.max(...u.map((q) => q.y)) };
+      return { minX: Math.min(...u.map((q) => q.x)), minY: Math.min(...u.map((q) => q.y)), maxX: Math.max(...u.map((q) => q.x)), maxY: Math.max(...u.map((q) => q.y)) };
     }
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     const zdalnych = Math.min(4, rozdzielnieZdalne(null).length);
@@ -385,6 +382,16 @@ export function createPlanView(containerId, ustawienia = {}) {
 
   function dopasuj(szer, wys, v = widok) {
     const o = obszarSwiata();
+    if (SCHEMAT) {
+      // szerokość: poziomy + ok. 170 px na nazwę i opis ostatniego poziomu; wysokość — przewijanie (przeciąganie palcem)
+      const m = 18;
+      const sw = Math.max(o.maxX - o.minX, SCH_DX);
+      v.s = Math.max(0.8, Math.min(2.2, (szer - 2 * m - 195) / sw));
+      if (v === widok) widok.sFit = v.s;
+      v.tx = m + 14 - o.minX * v.s;
+      v.ty = m + 10 - o.minY * v.s;
+      return v;
+    }
     const margines = Math.max(36, Math.min(110, szer * 0.12)); // miejsce na symbole i opisy po bokach chodników
     const sw = Math.max(o.maxX - o.minX, 20);
     const sh = Math.max(o.maxY - o.minY, 20);
@@ -586,7 +593,7 @@ export function createPlanView(containerId, ustawienia = {}) {
         const r = rozwiaz(pole.miejsce_zabudowy, dane.rozdzielnie || [], 'nazwa_r');
         const a = r && poz[`rozdzielnie:${r.id}`];
         const b = poz[`poleRozdzielcze:${pole.id}`];
-        if (a && b) czesci.chodniki.push(`<polyline points="${a.x},${a.y} ${a.x},${(a.y + b.y) / 2} ${b.x},${(a.y + b.y) / 2} ${b.x},${b.y}" fill="none" stroke="${KOLOR.sn}" stroke-width="${(3 + sk()).toFixed(1)}"${a.obcy || b.obcy ? ' opacity="0.35"' : ''}/>`);
+        if (a && b) czesci.chodniki.push(`<polyline points="${a.x},${a.y} ${a.x},${b.y} ${b.x},${b.y}" fill="none" stroke="${KOLOR.sn}" stroke-width="${(3 + sk()).toFixed(1)}"${a.obcy || b.obcy ? ' opacity="0.35"' : ''}/>`);
       }
     }
     // obiekty z położeniem (kolejność: rozdzielnie, transformatory, urządzenia, KB)
@@ -683,9 +690,12 @@ export function createPlanView(containerId, ustawienia = {}) {
       pas += 1;
       let punkty = [{ x: a.x, y: a.y }];
       if (SCHEMAT) {
-        if (Math.abs(a.y - b.y) > 1) {
-          const sy = a.y + (b.y - a.y) * 0.55 + (pas % 3) * 2;
-          punkty.push({ x: a.x, y: sy }, { x: b.x, y: sy });
+        // pień w dół od zasilającego, potem w prawo do zasilanego; kable różnych napięć z jednego trafo obok siebie
+        const dxp = napKabla >= 3 ? 0 : napKabla >= 0.9 ? -3 : 3;
+        if (Math.abs(a.x - b.x) > 1) {
+          punkty = [{ x: a.x + dxp, y: a.y }, { x: a.x + dxp, y: b.y }];
+        } else {
+          punkty = [{ x: a.x + dxp, y: a.y }];
         }
       }
       const t = !SCHEMAT && a.lok && b.lok ? trasa(a.lok, b.lok) : null;
@@ -701,7 +711,7 @@ export function createPlanView(containerId, ustawienia = {}) {
       const idKabla = `${p.cel.store}:${p.cel.rec.id}:${p.prefiks}`;
       const blade = a.obcy || b.obcy ? ' opacity="0.35"' : '';
       czesci.kable.push(`<polyline points="${punkty.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(' ')}" fill="none" stroke="${kolor}" stroke-width="${grubKabla.toFixed(1)}"${kreski}${blade} stroke-linejoin="round"/><polyline points="${punkty.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(' ')}" fill="none" stroke="transparent" stroke-width="12" data-kabel="${esc(idKabla)}" class="plan-klik"/>`);
-      if (warstwy.napiecieKabli || warstwy.opisyKabli) {
+      if (!SCHEMAT && (warstwy.napiecieKabli || warstwy.opisyKabli)) {
         let naj = 0;
         let s = [punkty[0], punkty[1] || punkty[0]];
         for (let i = 1; i < punkty.length; i += 1) {
@@ -730,7 +740,13 @@ export function createPlanView(containerId, ustawienia = {}) {
       if (p.zdalna) tytul = `${tytul || ''} (poza rejonem)`;
       if (p.obcy) tytul = `${tytul || ''}${dopiskObcego(def.store, rec)}`;
       const pol = opis(p.x, p.y, tytul || '(bez nazwy)', { rx, ry, wazny: def.store === 'rozdzielnie' || def.store === 'kb' });
-      if (warstwy.daneObiektow) podpis(pol, daneObiektu(def.store, rec));
+      if (SCHEMAT) {
+        const kab = kable.find((q) => q.cel.store === def.store && q.cel.rec.id === rec.id && q.prefiks !== 'kabel_rez');
+        const nap = kab && warstwy.napiecieKabli ? znacznikNapiecia(napiecieKabla(kab)) : '';
+        const ok = kab && warstwy.opisyKabli && maOpisKabla(rec, 'kabel') ? `kabel ${opisKabla(rec, 'kabel')}` : '';
+        const dan = warstwy.daneObiektow ? daneObiektu(def.store, rec) : '';
+        podpis(pol, [dan, nap && !dan.includes(nap) ? nap : '', ok].filter(Boolean).join(' · '));
+      } else if (warstwy.daneObiektow) podpis(pol, daneObiektu(def.store, rec));
     }
 
     for (const args of opisyKabli) opis(...args);
@@ -802,7 +818,7 @@ export function createPlanView(containerId, ustawienia = {}) {
       // wysokość dobrana do kształtu rejonu (wąski telefon + "płaski" rejon = niski plan, bez pustego pasa)
       dopasuj(szer, maksWys);
       const o = obszarSwiata();
-      const potrzebna = (o.maxY - o.minY) * widok.s + 2 * Math.max(36, Math.min(110, szer * 0.12));
+      const potrzebna = (o.maxY - o.minY) * widok.s + (SCHEMAT ? 60 : 2 * Math.max(36, Math.min(110, szer * 0.12)));
       widok.wys = pelny ? maksWys : Math.round(Math.min(maksWys, Math.max(360, potrzebna)));
       dopasuj(szer, widok.wys);
       widok.dopasowany = true;
