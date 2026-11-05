@@ -393,7 +393,7 @@ export function createImportExcel(containerId, { onImported } = {}) {
       const w = await importujSchemat(model);
       krokEl.innerHTML = '';
       input.value = '';
-      statusEl.textContent = `Gotowe: rozdzielnie +${w.rozdzielnie[0]} / zaktualizowane ${w.rozdzielnie[1]}, pola +${w.pola[0]} / ${w.pola[1]}, transformatory +${w.transformatory[0]} / ${w.transformatory[1]}, aparaty i pompy +${w.urzadzenia[0]} / ${w.urzadzenia[1]}. Zobacz Układ zasilania; położenie w chodnikach ustawisz na Planie rejonu.`;
+      statusEl.textContent = `Gotowe: rozdzielnie +${w.rozdzielnie[0]} / zaktualizowane ${w.rozdzielnie[1]}, pola +${w.pola[0]} / ${w.pola[1]}, transformatory +${w.transformatory[0]} / ${w.transformatory[1]}, aparaty i pompy +${w.urzadzenia[0]} / ${w.urzadzenia[1]}. Zobacz Graf zasilania i Mapę rejonu; położenie w chodnikach ustawisz na Planie rejonu.`;
       if (onImported) await onImported();
     });
   }

@@ -399,23 +399,6 @@ try {
   const polL = T.polaczenia().find((p) => p.cel.store === 'maszyny' && p.cel.rec.id === MW05);
   ok(T.problemyPolaczenia(polL).join(' ').includes('wyłącznik daje 1 kV'), 'maszyna 0,5 kV z wyłącznika 1 kV — niezgodne napięcie urządzenia końcowego');
   ok(document.querySelector('#plan-braki')?.textContent.includes('Silniki z napięciem niezgodnym z zasilaniem'), 'lista silników niezgodnych pod planem');
-  // 15c) Układ zasilania przejmuje Mapę rejonu: silniki pod maszyną, legalizacja > 1 rok (05.11.2026)
-  const waRec = (await db.nadzorGetAll('urzadzenia')).find((r) => r.id === WA);
-  await db.nadzorUpdate('urzadzenia', { ...waRec, nastawy_zabezpieczen: [{ nazwa: 'zab', nastawa: '1', legalizacja: '2024-01-10' }] });
-  await graf.init({});
-  const pgS = G.pozycje();
-  ok(pgS[`silniki:${S3}`] && pgS[`silniki:${S3}`].x > pgS[`maszyny:${MW}`].x && pgS[`silniki:${S3}`].y > pgS[`maszyny:${MW}`].y, 'silniki maszyny jako wiersze pod nią w Układzie zasilania');
-  ok([...document.querySelectorAll('#graf-content svg text')].some((t) => t.textContent.includes('REJ-WA') && t.textContent.includes('⚠ legalizacja > 1 rok')), 'ostrzeżenie: legalizacja zabezpieczenia > 1 rok');
-  ok(document.querySelector('#graf-content .plan-braki')?.textContent.includes('Zabezpieczenia z legalizacją starszą niż rok'), 'lista zabezpieczeń z przeterminowaną legalizacją');
-  // 15d) Pompy wodne — urządzenia końcowe (05.11.2026)
-  const PW = await db.nadzorAdd('urzadzenia', { nazwa: 'OW-1', u_rodzaj: U_RODZAJE[1], o_rodzaj: 'pompa wodna', nap_zas: '1 kV', pw_wydajnosc: 120, pw_wysokosc: 85, pw_miejsce: 'rząpie R-2', zasilane_z_urzadzenia: WP });
-  await graf.init({});
-  const pPW = G.pozycje()[`urzadzenia:${PW}`];
-  ok(pPW && pPW.def.symbol === 'pompa' && pPW.y > G.pozycje()[`urzadzenia:${WP}`].y, 'pompa wodna w Układzie zasilania z symbolem pompy, pod wyłącznikiem');
-  ok(document.querySelector(`#graf-content [data-obiekt="urzadzenia:${PW}"] path`) && [...document.querySelectorAll('#graf-content svg text')].some((t) => t.textContent.includes('120 m³/h') && t.textContent.includes('H 85 m')), 'opis pompy: wydajność i wysokość podnoszenia');
-  const polPW = T.polaczenia().find((p) => p.cel.store === 'urzadzenia' && p.cel.rec.id === PW) || (await plan.init({}), T.polaczenia().find((p) => p.cel.store === 'urzadzenia' && p.cel.rec.id === PW));
-  ok(polPW && T.rodzajPolaczenia(polPW) === 'odplyw' && T.problemyPolaczenia(polPW).length === 0, 'pompa — odpływ z wyłącznika, zgodny');
-  ok(T.zrodlaDla('pompa').every((o) => o.wartosc.includes('|urzadzenia|') || o.wartosc.includes('|poleRozdzielcze|')), 'pompę zasila wyłącznik albo (6 kV) pole');
   // 16) Zakładki Nadzoru: Wyłączniki / Odbiorniki końcowe jako widoki jednego magazynu (05.11.2026)
   document.body.insertAdjacentHTML('beforeend', '<nav id="tz-tabs"></nav><div id="tz-list"></div><div id="tz-form" class="hidden"></div><button id="tz-add">+</button>');
   const { createCrudModule } = await import('./js/crud-module.js');
@@ -423,7 +406,7 @@ try {
   const crud = createCrudModule({ entities: ENT.NADZOR_ENTITIES, tabs: ENT.NADZOR_ZAKLADKI, tabsId: 'tz-tabs', listId: 'tz-list', formId: 'tz-form', addBtnId: 'tz-add' });
   await crud.init();
   const chipy = [...document.querySelectorAll('#tz-tabs .chip')].map((b) => b.textContent.trim());
-  ok(chipy.slice(0, 8).join('|') === 'Rozdzielnie|Pola rozdzielcze|Transformatory|Wyłączniki / aparaty|Odbiorniki końcowe|Pompy wodne|KB (rejony)|Maszyny', `kolejność zakładek wg budowy sieci (${chipy.slice(0, 8).join(', ')})`);
+  ok(chipy.slice(0, 7).join('|') === 'Rozdzielnie|Pola rozdzielcze|Transformatory|Wyłączniki / aparaty|Odbiorniki końcowe|KB (rejony)|Maszyny', `kolejność zakładek wg budowy sieci (${chipy.slice(0, 7).join(', ')})`);
   document.querySelector('#tz-tabs [data-entity="odbiorniki"]').click();
   await new Promise((r) => setTimeout(r, 150));
   const lista = document.getElementById('tz-list').textContent;
@@ -433,13 +416,6 @@ try {
   ok(document.querySelector('#tz-form [name="u_rodzaj"]')?.value === ENT.U_RODZAJE[1], 'nowy rekord w Odbiornikach ma rodzaj „odbiornik”');
   await crud.editRecord('urzadzenia', WA);
   ok(document.querySelector('#tz-tabs .chip.active')?.dataset.entity === 'wylaczniki', 'edycja wyłącznika z planu otwiera zakładkę Wyłączniki / aparaty');
-  document.querySelector('#tz-tabs [data-entity="pompy"]').click();
-  await new Promise((r) => setTimeout(r, 150));
-  const listaP = document.getElementById('tz-list').textContent;
-  ok(listaP.includes('OW-1') && !listaP.includes('REJ-pompa'), 'zakładka Pompy wodne: tylko pompy wodne');
-  document.getElementById('tz-add').click();
-  await new Promise((r) => setTimeout(r, 150));
-  ok(document.querySelector('#tz-form [name="o_rodzaj"]')?.value === 'pompa wodna' && document.querySelector('#tz-form [name="u_rodzaj"]')?.value === U_RODZAJE[1], 'nowa pompa: odbiornik, rodzaj pompa wodna');
   window.__niezgodne =[...document.querySelectorAll('#plan-braki details')].find((d) => d.textContent.includes('niezgodne'))?.textContent || '';
   window.__gotowe = true;
 } catch (e) {

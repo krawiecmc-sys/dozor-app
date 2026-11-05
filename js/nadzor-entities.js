@@ -74,9 +74,6 @@ function poleKabla(prefix = 'kabel', naglowek = 'Kabel zasilający (od źródła
 
 // Rodzaj urządzenia (03.11.2026, Piotr): transformator zasila wyłączniki/aparaty, nie bezpośrednio silniki.
 export const U_RODZAJE = ['wyłącznik / aparat', 'odbiornik (silnik, pompa, wentylator…)'];
-// 05.11.2026 (Piotr): pompy wodne jako urządzenia końcowe — rodzaj odbiornika, własny symbol i zakładka-widok
-export const O_RODZAJE = ['', 'pompa wodna', 'wentylator', 'wciągarka', 'sprężarka', 'inny'];
-export const POMPA = 'pompa wodna';
 
 export const NADZOR_ENTITIES = {
   rozdzielnie: {
@@ -232,10 +229,6 @@ export const NADZOR_ENTITIES = {
       { key: 'rejon', label: 'Rejon (KB)', type: 'fk-or-free', refStore: 'kb', refField: 'kb_nazwa', hint: 'Zwykle puste — rejon jak źródło zasilania.' },
       { key: 'symbol', label: 'Symbol', type: 'text' },
       { key: 'u_rodzaj', label: 'Rodzaj', type: 'select', options: U_RODZAJE, hint: 'Transformator zasila wyłączniki / aparaty. Odbiornik (silnik, pompa, wentylator) zasilany jest z wyłącznika.' },
-      { key: 'o_rodzaj', label: 'Rodzaj odbiornika', type: 'select', options: O_RODZAJE, hint: 'Tylko dla odbiornika końcowego. Pompa wodna ma własny symbol na planie i w Układzie zasilania oraz zakładkę Pompy wodne.' },
-      { key: 'pw_wydajnosc', label: 'Pompa: wydajność (m³/h)', type: 'number', blank: true },
-      { key: 'pw_wysokosc', label: 'Pompa: wysokość podnoszenia (m)', type: 'number', blank: true },
-      { key: 'pw_miejsce', label: 'Pompa: miejsce pompowania (rząpie, zbiornik, chodnik)', type: 'text' },
       { key: 'oddzial', label: 'Oddział elektryczny (użytkownik)', type: 'select', options: ['', 'odstawczy', 'przodkowy', 'ścianowy', 'inny'], hint: 'Na tej samej sieci są transformatory i urządzenia innych oddziałów — na Planie rejonu widać je wyblakłe albo ukryte. Puste: jak transformator, z którego zasilane.' },
       { key: 'moc', label: 'Moc (kW)', type: 'number' },
       { key: 'nap_zas', label: 'Napięcie zasilania', type: 'select', options: ['0,5 kV', '1 kV', '6 kV'] },
@@ -455,7 +448,6 @@ export const NADZOR_ZAKLADKI = [
   { key: 'transformatory', entity: 'transformatory' },
   { key: 'wylaczniki', entity: 'urzadzenia', label: 'Wyłączniki / aparaty', labelSingular: 'wyłącznik / aparat', filtr: (r) => !jestOdb(r), stale: { u_rodzaj: U_RODZAJE[0] } },
   { key: 'odbiorniki', entity: 'urzadzenia', label: 'Odbiorniki końcowe', labelSingular: 'odbiornik końcowy', filtr: jestOdb, stale: { u_rodzaj: U_RODZAJE[1] } },
-  { key: 'pompy', entity: 'urzadzenia', label: 'Pompy wodne', labelSingular: 'pompa wodna', filtr: (r) => jestOdb(r) && r.o_rodzaj === POMPA, stale: { u_rodzaj: U_RODZAJE[1], o_rodzaj: POMPA } },
   { key: 'kb', entity: 'kb', label: 'KB (rejony)' },
   { key: 'maszyny', entity: 'maszyny' },
   { key: 'przenosniki', entity: 'przenosniki', label: 'Przenośniki / napędy' },
