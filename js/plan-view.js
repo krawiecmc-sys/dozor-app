@@ -183,7 +183,7 @@ export function createPlanView(containerId, ustawienia = {}) {
   // ---------- dane i geometria ----------
 
   async function wczytajDane() {
-    const magazyny = ['chodniki', 'przenosniki', 'rozdzielnie', 'poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb', 'maszyny', 'silniki'];
+    const magazyny = ['chodniki', 'przenosniki', 'rozdzielnie', 'poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb', 'maszyny', 'silniki', 'czujniki'];
     const wyniki = await Promise.all(magazyny.map((m) => nadzorGetAll(m)));
     dane = Object.fromEntries(magazyny.map((m, i) => [m, wyniki[i]]));
     katalog = await wczytajKatalog();
@@ -291,7 +291,14 @@ export function createPlanView(containerId, ustawienia = {}) {
     return wynik;
   }
 
-  // ---------- układ schematu (Graf zasilania) ----------
+  // legalizacja zabezpieczenia starsza niż rok (dawniej tylko w Mapie rejonu)
+  const ROK_MS = 365 * 24 * 60 * 60 * 1000;
+  const poLegalizacji = (rec) => Array.isArray(rec?.nastawy_zabezpieczen) && rec.nastawy_zabezpieczen.some((w) => {
+    const d = new Date(w?.legalizacja || '');
+    return w?.legalizacja && !Number.isNaN(d.getTime()) && Date.now() - d.getTime() > ROK_MS;
+  });
+
+  // ---------- układ schematu (Układ zasilania) ----------
   // Drzewo wierszowe (05.11.2026, Piotr: "graf nieczytelny"): każdy element w swoim wierszu, poziom sieci = wcięcie
   // (rozdzielnia → pola → transformatory → wyłączniki → odbiorniki końcowe / KB / maszyny / napędy); nazwa obok symbolu
   // nic nie zasłania, bo elementy zasilane stoją w kolejnych wierszach. Rodzic = źródło zasilania (pole: rozdzielnia).
@@ -345,6 +352,14 @@ export function createPlanView(containerId, ustawienia = {}) {
       odwiedzone.add(k);
       const w = wezly.get(k);
       uklad.set(k, { x: poziom * SCH_DX, y: wiersz++ * SCH_DY, poziom });
+      // silniki i czujniki maszyny (KB, maszyna, napęd, odbiornik) — wiersze pod nią
+      for (const sm of ['silniki', 'czujniki']) {
+        for (const id of Array.isArray(w.rec[sm]) ? w.rec[sm] : []) {
+          const kk = `${sm}:${id}`;
+          if (uklad.has(kk) || !(dane[sm] || []).some((r) => r.id === id)) continue;
+          uklad.set(kk, { x: (poziom + 1) * SCH_DX, y: wiersz++ * SCH_DY, poziom: poziom + 1, rodzic: k });
+        }
+      }
       for (const d of w.dzieci) umiesc(d, poziom + 1);
       for (const pk of w.przeloty) umiesc(pk, poziom);
     };
@@ -510,6 +525,8 @@ export function createPlanView(containerId, ustawienia = {}) {
     if (store === 'urzadzenia') return [rec.nap_zas, kw(rec.moc, 'kW')].filter(Boolean).join(' · ');
     if (store === 'kb') return [rec.typ_kb, rec.nap_zas].filter(Boolean).join(' · ');
     if (store === 'maszyny') return [rec.m_rodzaj, rec.nap_zas, num(rec.moc) ? `${rec.moc} kW` : ''].filter(Boolean).join(' · ');
+    if (store === 'silniki') return ['silnik', num(rec.s_moc) ? `${rec.s_moc} kW` : '', rec.napiecie_zas, rec.s_rodzaj].filter(Boolean).join(' · ');
+    if (store === 'czujniki') return ['czujnik', rec.opis].filter(Boolean).join(' · ');
     if (store === 'przenosniki') return kw(rec.pr_moc, 'kW');
     return '';
   }
@@ -583,10 +600,18 @@ export function createPlanView(containerId, ustawienia = {}) {
         const rec = (dane[st] || []).find((r) => r.id === Number(idS));
         if (!rec) continue;
         const p = naEkran(q, v);
-        const def = st === 'poleRozdzielcze' ? { store: st, symbol: 'pole', label: 'Pole rozdzielcze', title: 'p_nazwa' }
+        const def = st === 'silniki' ? { store: st, symbol: 'naped', label: 'Silnik', title: 'nazwa_silnika' }
+          : st === 'czujniki' ? { store: st, symbol: 'czujnik', label: 'Czujnik', title: 'nazwa_czujnik' }
+          : st === 'poleRozdzielcze' ? { store: st, symbol: 'pole', label: 'Pole rozdzielcze', title: 'p_nazwa' }
           : st === 'przenosniki' ? { store: st, symbol: 'naped', label: 'Przenośnik / napęd', title: 'pr_nr' }
             : OBIEKTY.find((o) => o.store === st);
-        poz[k] = { x: p.x, y: p.y, lok: null, rec, obcy: obcyEl(st, rec), def: st === 'urzadzenia' && jestOdbiornik(rec) ? { ...def, symbol: 'naped' } : def };
+        const rodzic = q.rodzic ? poz[q.rodzic] : null;
+        poz[k] = { x: p.x, y: p.y, lok: null, rec, rodzic: q.rodzic || null, obcy: rodzic ? rodzic.obcy : obcyEl(st, rec), def: st === 'urzadzenia' && jestOdbiornik(rec) ? { ...def, symbol: 'naped' } : def };
+      }
+      // silnik / czujnik — cienka szara linia do maszyny
+      for (const q of Object.values(poz)) {
+        const a = q.rodzic && poz[q.rodzic];
+        if (a) czesci.chodniki.push(`<polyline points="${a.x},${a.y} ${a.x},${q.y} ${q.x},${q.y}" fill="none" stroke="#90a4ae" stroke-width="1.2" stroke-dasharray="2 2"${q.obcy ? ' opacity="0.35"' : ''}/>`);
       }
       // szyna rozdzielni: pole połączone ze swoją rozdzielnią
       for (const pole of dane.poleRozdzielcze || []) {
@@ -739,12 +764,15 @@ export function createPlanView(containerId, ustawienia = {}) {
       let tytul = def.store === 'przenosniki' ? [rec.pr_typ, rec.pr_nr].filter(Boolean).join(' ') : rec[def.title];
       if (p.zdalna) tytul = `${tytul || ''} (poza rejonem)`;
       if (p.obcy) tytul = `${tytul || ''}${dopiskObcego(def.store, rec)}`;
-      const pol = opis(p.x, p.y, tytul || '(bez nazwy)', { rx, ry, wazny: def.store === 'rozdzielnie' || def.store === 'kb' });
+      const stara = poLegalizacji(rec);
+      if (stara) tytul = `${tytul || ''} ⚠ legalizacja > 1 rok`;
+      const pol = opis(p.x, p.y, tytul || '(bez nazwy)', { rx, ry, wazny: def.store === 'rozdzielnie' || def.store === 'kb', ...(stara ? { kolor: '#c62828' } : {}) });
       if (SCHEMAT) {
         const kab = kable.find((q) => q.cel.store === def.store && q.cel.rec.id === rec.id && q.prefiks !== 'kabel_rez');
         const nap = kab && warstwy.napiecieKabli ? znacznikNapiecia(napiecieKabla(kab)) : '';
         const ok = kab && warstwy.opisyKabli && maOpisKabla(rec, 'kabel') ? `kabel ${opisKabla(rec, 'kabel')}` : '';
-        const dan = warstwy.daneObiektow ? daneObiektu(def.store, rec) : '';
+        const bezZas = !kab && !p.rodzic && ['transformatory', 'urzadzenia', 'kb', 'maszyny', 'przenosniki'].includes(def.store) ? 'bez zasilania w bazie' : '';
+        const dan = [bezZas, warstwy.daneObiektow ? daneObiektu(def.store, rec) : ''].filter(Boolean).join(' · ');
         podpis(pol, [dan, nap && !dan.includes(nap) ? nap : '', ok].filter(Boolean).join(' · '));
       } else if (warstwy.daneObiektow) podpis(pol, daneObiektu(def.store, rec));
     }
@@ -790,7 +818,7 @@ export function createPlanView(containerId, ustawienia = {}) {
       svgEl.innerHTML = '';
       wrapEl.classList.add('hidden');
       legendaEl.innerHTML = '';
-      brakiEl.innerHTML = `<div class="plan-pusty"><p><b>Graf zasilania jest pusty.</b> Rysuje się sam z danych: rozdzielnie, pola, transformatory, wyłączniki, odbiorniki, KB i napędy z polami „zasilany z”. Dodaj pierwszy element przyciskiem „+ Dodaj element” albo zaimportuj dane w Synchronizacji.</p></div>`;
+      brakiEl.innerHTML = `<div class="plan-pusty"><p><b>Układ zasilania jest pusty.</b> Rysuje się sam z danych: rozdzielnie, pola, transformatory, wyłączniki, odbiorniki, KB i napędy z polami „zasilany z”. Dodaj pierwszy element przyciskiem „+ Dodaj element” albo zaimportuj dane w Synchronizacji.</p></div>`;
       return;
     }
     if (!SCHEMAT && !(dane.chodniki || []).length) {
@@ -919,6 +947,8 @@ export function createPlanView(containerId, ustawienia = {}) {
       blok('Przenośniki bez chodnika', przenBez.map((rec) => `<li>${esc(nazwa('przenosniki', rec))} <button type="button" class="btn-small" data-edytuj="przenosniki:${rec.id}">Edytuj</button></li>`)),
       blok('Połączenia bez opisu kabla', bezKabla.map((k) => `<li>${esc(nazwa(k.zrodlo.store, k.zrodlo.rec))} → ${esc(nazwa(k.cel.store, k.cel.rec))}${k.prefiks === 'kabel_rez' ? ' (rezerwowe)' : ''} <button type="button" class="btn-small" data-edytuj="${k.cel.store}:${k.cel.rec.id}">Uzupełnij kabel</button></li>`)),
       blok('Połączenia niezgodne z układem zasilania', niezgodne.map(({ k, pow }) => `<li>${esc(nazwa(k.zrodlo.store, k.zrodlo.rec))} → ${esc(nazwa(k.cel.store, k.cel.rec))}: ${esc(pow.join('; '))} <button type="button" class="btn-small" data-zasilanie="${k.cel.store}:${k.cel.rec.id}">Zmień zasilanie</button></li>`)),
+      blok('Zabezpieczenia z legalizacją starszą niż rok', ['rozdzielnie', 'poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb', 'maszyny'].flatMap((st) => (dane[st] || []).filter((r) => poLegalizacji(r) && !ukryty(st, r)).map((r) => `<li>${esc(nazwa(st, r))} <button type="button" class="btn-small" data-edytuj="${st}:${r.id}">Edytuj</button></li>`))),
+      blok('Silniki i czujniki nieprzypisane do żadnej maszyny', ['silniki', 'czujniki'].flatMap((sm) => (dane[sm] || []).filter((x) => !['kb', 'maszyny', 'przenosniki', 'urzadzenia'].some((st) => (dane[st] || []).some((r) => Array.isArray(r[sm]) && r[sm].includes(x.id)))).map((x) => `<li>${esc(x.nazwa_silnika || x.nazwa_czujnik || '#' + x.id)} <button type="button" class="btn-small" data-edytuj="${sm}:${x.id}">Edytuj</button></li>`))),
       blok('Silniki z napięciem niezgodnym z zasilaniem', problemySilnikow().map(({ s, pow }) => `<li>${esc(pow)} <button type="button" class="btn-small" data-edytuj="silniki:${s.id}">Edytuj silnik</button></li>`)),
       blok('Urządzenia z napięciem niezgodnym z typem', zlyTyp.map(({ rec, pow }) => `<li>${esc(nazwa('urzadzenia', rec))}: ${esc(pow)} <button type="button" class="btn-small" data-edytuj="urzadzenia:${rec.id}">Edytuj</button></li>`)),
       blok('Do sprawdzenia: wyłącznik z kilkoma odpływami do urządzeń końcowych (zwykle jeden)', doSprawdzenia.map(({ rec, cele }) => `<li>${esc(nazwa('urzadzenia', rec))} → ${esc(cele.join(', '))}</li>`)),
@@ -975,13 +1005,13 @@ export function createPlanView(containerId, ustawienia = {}) {
       ${kabel}
       <div class="form-actions">
         <button type="button" class="btn-small" data-edytuj="${store}:${id}">Edytuj</button>
-        ${store !== 'rozdzielnie' ? `<button type="button" class="btn-small" data-zasilanie="${store}:${id}">Zasilanie…</button>` : ''}
+        ${store !== 'rozdzielnie' && store !== 'silniki' && store !== 'czujniki' ? `<button type="button" class="btn-small" data-zasilanie="${store}:${id}">Zasilanie…</button>` : ''}
         ${DOMYSLNY_ODPLYW[rodzajRek(store, rec)] ? `<button type="button" class="btn-small" data-odplyw="${store}:${id}">+ Odpływ stąd</button>` : ''}
         ${store === 'rozdzielnie' ? `<button type="button" class="btn-small" data-dodaj-pole="${id}">+ Pole</button>` : ''}
         ${!SCHEMAT && store !== 'poleRozdzielcze' && store !== 'przenosniki' ? `<button type="button" class="btn-small" data-postaw="${store}:${id}">Przestaw</button>` : ''}
         ${!SCHEMAT && MOZE_STAC_PRZY.has(store) ? `<button type="button" class="btn-small" data-umiejscowienie="${store}:${id}">Umiejscowienie…</button>` : ''}
         ${!SCHEMAT && (num(rec.plan_dx) || num(rec.plan_dy)) ? `<button type="button" class="btn-small" data-reset="${store}:${id}">Cofnij przesunięcie</button>` : ''}
-        ${onPokazWInnymWidoku ? `<button type="button" class="btn-small" data-inny-widok="${store}:${id}">${SCHEMAT ? 'Na planie' : 'W grafie'}</button>` : ''}
+        ${onPokazWInnymWidoku && store !== 'silniki' && store !== 'czujniki' ? `<button type="button" class="btn-small" data-inny-widok="${store}:${id}">${SCHEMAT ? 'Na planie' : 'W układzie zasilania'}</button>` : ''}
         ${onShowInMap ? `<button type="button" class="btn-small" data-mapa="${store}:${id}">W Mapie</button>` : ''}
         <button type="button" class="btn-small btn-danger" data-usun="${store}:${id}">Usuń</button>
         <button type="button" class="btn-small" data-akcja="zamknij-karte">Zamknij</button>
@@ -2002,5 +2032,5 @@ export function createPlanView(containerId, ustawienia = {}) {
     return true;
   }
 
-  return { init, pokaz, _test: { problemySilnikow, problemNapiecia, ukladSchematu, tryb, rejony, obcyRejon, ustawRejon: (r, pokazInne = true) => { mojRejon = r; warstwy.inneOddzialy = pokazInne; }, oddzialRek, ustawOddzial: (o, pokazInne = true) => { mojOddzial = o; warstwy.inneOddzialy = pokazInne; }, opisChodnika, opcjePrzy, pozycje: () => rysuj(widok, { szer: 1000, wys: 700 }).poz, problemTypu, napieciaDoWyboru, katalog: () => katalog, zrodlaDla, odplywyDla, zgodnePolaczenie, problemyPolaczenia, rodzajPolaczenia, opcjeNapieciaFormularza, napiecieEfektywne, kilkaOdplywow, polaczenia: () => polaczenia().wynik, wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
+  return { init, pokaz, _test: { poLegalizacji, problemySilnikow, problemNapiecia, ukladSchematu, tryb, rejony, obcyRejon, ustawRejon: (r, pokazInne = true) => { mojRejon = r; warstwy.inneOddzialy = pokazInne; }, oddzialRek, ustawOddzial: (o, pokazInne = true) => { mojOddzial = o; warstwy.inneOddzialy = pokazInne; }, opisChodnika, opcjePrzy, pozycje: () => rysuj(widok, { szer: 1000, wys: 700 }).poz, problemTypu, napieciaDoWyboru, katalog: () => katalog, zrodlaDla, odplywyDla, zgodnePolaczenie, problemyPolaczenia, rodzajPolaczenia, opcjeNapieciaFormularza, napiecieEfektywne, kilkaOdplywow, polaczenia: () => polaczenia().wynik, wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
 }

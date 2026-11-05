@@ -399,6 +399,14 @@ try {
   const polL = T.polaczenia().find((p) => p.cel.store === 'maszyny' && p.cel.rec.id === MW05);
   ok(T.problemyPolaczenia(polL).join(' ').includes('wyłącznik daje 1 kV'), 'maszyna 0,5 kV z wyłącznika 1 kV — niezgodne napięcie urządzenia końcowego');
   ok(document.querySelector('#plan-braki')?.textContent.includes('Silniki z napięciem niezgodnym z zasilaniem'), 'lista silników niezgodnych pod planem');
+  // 15c) Układ zasilania przejmuje Mapę rejonu: silniki pod maszyną, legalizacja > 1 rok (05.11.2026)
+  const waRec = (await db.nadzorGetAll('urzadzenia')).find((r) => r.id === WA);
+  await db.nadzorUpdate('urzadzenia', { ...waRec, nastawy_zabezpieczen: [{ nazwa: 'zab', nastawa: '1', legalizacja: '2024-01-10' }] });
+  await graf.init({});
+  const pgS = G.pozycje();
+  ok(pgS[`silniki:${S3}`] && pgS[`silniki:${S3}`].x > pgS[`maszyny:${MW}`].x && pgS[`silniki:${S3}`].y > pgS[`maszyny:${MW}`].y, 'silniki maszyny jako wiersze pod nią w Układzie zasilania');
+  ok([...document.querySelectorAll('#graf-content svg text')].some((t) => t.textContent.includes('REJ-WA') && t.textContent.includes('⚠ legalizacja > 1 rok')), 'ostrzeżenie: legalizacja zabezpieczenia > 1 rok');
+  ok(document.querySelector('#graf-content .plan-braki')?.textContent.includes('Zabezpieczenia z legalizacją starszą niż rok'), 'lista zabezpieczeń z przeterminowaną legalizacją');
   // 16) Zakładki Nadzoru: Wyłączniki / Odbiorniki końcowe jako widoki jednego magazynu (05.11.2026)
   document.body.insertAdjacentHTML('beforeend', '<nav id="tz-tabs"></nav><div id="tz-list"></div><div id="tz-form" class="hidden"></div><button id="tz-add">+</button>');
   const { createCrudModule } = await import('./js/crud-module.js');
