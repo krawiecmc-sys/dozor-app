@@ -317,6 +317,8 @@ export const NADZOR_ENTITIES = {
     titleField: 'ch_nazwa',
     fields: [
       { key: 'ch_nazwa', label: 'Nazwa chodnika', type: 'text', required: true },
+      { key: 'ch_nr', label: 'Nr chodnika', type: 'text' },
+      { key: 'ch_rodzaj', label: 'Rodzaj chodnika', type: 'select', options: ['', 'transportowy', 'odstawczy', 'dowierzchnia', 'przecinka', 'inny'], hint: 'Widać go przy napędach i na Planie rejonu (05.11.2026).' },
       {
         key: 'ch_od_chodnika',
         label: 'Odchodzi od chodnika',
@@ -347,7 +349,7 @@ export const NADZOR_ENTITIES = {
     fields: [
       { key: 'pr_nr', label: 'Nr przenośnika / napędu (np. 1.3)', type: 'text', required: true },
       { key: 'pr_typ', label: 'Typ (np. Pt1000, Mifama 1100)', type: 'text' },
-      { key: 'pr_chodnik', label: 'Chodnik', type: 'fk-or-free', refStore: 'chodniki', refField: 'ch_nazwa' },
+      { key: 'pr_chodnik', label: 'Chodnik', type: 'fk-or-free', refStore: 'chodniki', refField: 'ch_nazwa', hint: 'Nr i rodzaj chodnika (transportowy, odstawczy, dowierzchnia, przecinka) wpisuje się w zakładce Chodniki — pokażą się przy napędzie.' },
       { key: 'pr_od_m', label: 'Od metrażu (m)', type: 'number', blank: true },
       { key: 'pr_do_m', label: 'Do metrażu (m)', type: 'number', blank: true },
       { key: 'pr_naped_m', label: 'Napęd w metrażu (m)', type: 'number', blank: true, hint: 'Puste = na końcu "do metrażu".' },

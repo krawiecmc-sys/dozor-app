@@ -270,6 +270,31 @@ try {
   ok(JSON.stringify(d1.opcje) === '["0,5 kV"]' && d2.uwaga.includes('zmień źródło'), 'formularz: WSN-40P/1 z dwunapięciowego tylko 0,5 kV; z trafo 6/1 kV ostrzeżenie');
   const eksp9 = await db.exportAllData('t9');
   ok(Array.isArray(eksp9.katalogAparatow) || eksp9.katalogAparatow === null, 'eksport zawiera pole katalogu aparatów');
+  // 10) Umiejscowienie "przy obiekcie" (05.11.2026): wyłącznik napędowy przy napędzie, który zasila
+  const pr13 = (await db.nadzorGetAll('przenosniki')).find((r) => r.pr_nr === '1.3');
+  const WN = await db.nadzorAdd('urzadzenia', { nazwa: 'WN-napęd', u_rodzaj: U_RODZ[0], nap_zas: '0,5 kV', zasilane_z_transformatora: T8 });
+  await db.nadzorUpdate('przenosniki', { ...pr13, zasilany_z_urzadzenia: WN });
+  await plan.init({});
+  const op10 = T.opcjePrzy('urzadzenia', WN);
+  ok(op10[0].wartosc === `przenosniki:${pr13.id}` && op10[0].opis.startsWith('zasila: przy napędzie przenośnika'), `lista „stoi przy”: na górze napęd, który wyłącznik zasila (${op10[0].opis})`);
+  ok(op10.some((o) => o.opis.startsWith('źródło: przy transformatorze')) && !op10.some((o) => o.wartosc === `urzadzenia:${WN}`), 'lista: źródło zaraz po odbiorach, bez samego siebie');
+  const wnRec = (await db.nadzorGetAll('urzadzenia')).find((r) => r.id === WN);
+  await db.nadzorUpdate('urzadzenia', { ...wnRec, lok_przy: `przenosniki:${pr13.id}`, lok_strona: 'prawa' });
+  await plan.init({});
+  const poz10 = T.pozycje();
+  const pW = poz10[`urzadzenia:${WN}`];
+  ok(pW && pW.lok.przy === `przenosniki:${pr13.id}` && pW.lok.m === (pr13.pr_naped_m ?? pr13.pr_od_m) && pW.lok.strona === 'prawa', `wyłącznik stoi przy napędzie 1.3 (metraż ${pW?.lok.m}, strona ${pW?.lok.strona})`);
+  ok(T.opcjePrzy('przenosniki', pr13.id).every((o) => o.wartosc !== `urzadzenia:${WN}`), 'bez pętli: napęd nie może stać przy wyłączniku, który stoi przy nim');
+  const eksp10 = await db.exportAllData('t10');
+  await db.importAllData(eksp10, NADZOR_ENTITIES);
+  const kopieWN = (await db.nadzorGetAll('urzadzenia')).filter((r) => r.nazwa === 'WN-napęd').sort((x, y) => x.id - y.id);
+  const kopie13 = (await db.nadzorGetAll('przenosniki')).filter((r) => r.pr_nr === '1.3').map((r) => r.id);
+  ok(kopieWN.length >= 2 && kopieWN[1].lok_przy !== kopieWN[0].lok_przy && kopie13.includes(Number(kopieWN[1].lok_przy.split(':')[1])), `import kopii przepina „stoi przy” na kopię napędu (${kopieWN[1]?.lok_przy})`);
+  // 11) Nr i rodzaj chodnika (05.11.2026)
+  const chod = (await db.nadzorGetAll('chodniki')).find((r) => r.ch_nazwa === 'Chodnik 3');
+  ok(T.opisChodnika(chod) === 'nr 3 Chodnik 3 (odstawczy)', `opis chodnika: ${T.opisChodnika(chod)}`);
+  ok(T.opcjePrzy('urzadzenia', WN)[0].opis.includes('(nr 1 Chodnik 1 (transportowy))') || T.opcjePrzy('urzadzenia', WN)[0].opis.includes('(nr '), `napęd w liście „stoi przy” z chodnikiem (${T.opcjePrzy('urzadzenia', WN)[0].opis})`);
+  ok([...svg.querySelectorAll('text')].some((x) => x.textContent === 'nr 5 Chodnik 5 (przodek) (dowierzchnia)'), 'na planie chodnik z nr i rodzajem');
   window.__niezgodne = [...document.querySelectorAll('#plan-braki details')].find((d) => d.textContent.includes('niezgodne'))?.textContent || '';
   window.__gotowe = true;
 } catch (e) {

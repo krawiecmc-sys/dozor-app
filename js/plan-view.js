@@ -251,7 +251,20 @@ export function createPlanView(containerId) {
   const naEkran = (p, v = widok) => ({ x: p.x * v.s + v.tx, y: p.y * v.s + v.ty });
   const zEkranu = (p, v = widok) => ({ x: (p.x - v.tx) / v.s, y: (p.y - v.ty) / v.s });
 
-  function lokalizacja(store, rec) {
+  // 05.11.2026 (Piotr): umiejscowienie "przy obiekcie" — np. wyłącznik napędowy przy napędzie, który zasila.
+  // lok_przy = 'magazyn:id'; obiekt stoi przy wskazanym (ten sam chodnik i metraż) i przesuwa się razem z nim.
+  const przyObiekcie = (rec) => {
+    const [s0, i0] = String(rec?.lok_przy || '').split(':');
+    const t = s0 && i0 ? (dane[s0] || []).find((r) => r.id === Number(i0)) : null;
+    return t ? { store: s0, rec: t } : null;
+  };
+
+  function lokalizacja(store, rec, d = 0) {
+    const przy = d < 6 ? przyObiekcie(rec) : null;
+    if (przy) {
+      const l = lokalizacja(przy.store, przy.rec, d + 1);
+      if (l) return { ...l, strona: l.strona === 'oś' ? (rec.lok_strona === 'lewa' ? 'lewa' : 'prawa') : l.strona, przy: `${przy.store}:${przy.rec.id}` };
+    }
     if (store === 'przenosniki') {
       const ch = rozwiaz(rec.pr_chodnik, dane.chodniki, 'ch_nazwa');
       if (!ch) return null;
@@ -618,7 +631,7 @@ export function createPlanView(containerId) {
     if (warstwy.chodniki) {
       for (const g of geo.values()) {
         const srodek = naEkran({ x: g.x0 + (g.dx * g.len) / 2, y: g.y0 + (g.dy * g.len) / 2 }, v);
-        opis(srodek.x, srodek.y, g.rec.ch_nazwa + (g.brakDanych ? ' ⚠' : ''), { rx: 10 * sk(), ry: 12 * sk(), rozmiar: Math.round(8.5 + 2.5 * sk()), kolor: KOLOR.tekstChodnika });
+        opis(srodek.x, srodek.y, opisChodnika(g.rec) + (g.brakDanych ? ' ⚠' : ''), { rx: 10 * sk(), ry: 12 * sk(), rozmiar: Math.round(8.5 + 2.5 * sk()), kolor: KOLOR.tekstChodnika });
       }
     }
 
@@ -795,10 +808,16 @@ export function createPlanView(containerId) {
       .filter(([, v]) => v !== '' && v !== null && v !== undefined)
       .map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`)
       .join('');
+    const chNap = store === 'przenosniki' ? chodnikNapedu(rec) : rozwiaz(rec.lok_chodnik, dane.chodniki || [], 'ch_nazwa');
+    const wChodniku = chNap && !przyObiekcie(rec) ? `<p class="plan-karta-kabel">Chodnik: ${esc(opisChodnika(chNap))}${chNap.ch_nr || chNap.ch_rodzaj ? '' : ' — nr i rodzaj chodnika można dopisać w zakładce Chodniki'} <button type="button" class="btn-small" data-edytuj="chodniki:${chNap.id}">Edytuj chodnik</button></p>` : '';
+    const przy = przyObiekcie(rec);
+    const umiejsc = przy ? `<p class="plan-karta-kabel">Umiejscowienie: przy ${esc(opisObiektu(przy.store, przy.rec))}</p>` : '';
     const kabel = maOpisKabla(rec, 'kabel') ? `<p class="plan-karta-kabel">Kabel zasilający: ${esc(opisKabla(rec, 'kabel'))}${rec.kabel_odplyw ? ` (odpływ: ${esc(rec.kabel_odplyw)})` : ''}</p>` : '';
     otworzKarte(`
       <h4>${esc(def.labelSingular)}: ${esc(rec[def.titleField] || '')}</h4>
       <table>${wiersze}</table>
+      ${wChodniku}
+      ${umiejsc}
       ${kabel}
       <div class="form-actions">
         <button type="button" class="btn-small" data-edytuj="${store}:${id}">Edytuj</button>
@@ -806,6 +825,7 @@ export function createPlanView(containerId) {
         ${DOMYSLNY_ODPLYW[rodzajRek(store, rec)] ? `<button type="button" class="btn-small" data-odplyw="${store}:${id}">+ Odpływ stąd</button>` : ''}
         ${store === 'rozdzielnie' ? `<button type="button" class="btn-small" data-dodaj-pole="${id}">+ Pole</button>` : ''}
         ${store !== 'poleRozdzielcze' && store !== 'przenosniki' ? `<button type="button" class="btn-small" data-postaw="${store}:${id}">Przestaw</button>` : ''}
+        ${MOZE_STAC_PRZY.has(store) ? `<button type="button" class="btn-small" data-umiejscowienie="${store}:${id}">Umiejscowienie…</button>` : ''}
         ${num(rec.plan_dx) || num(rec.plan_dy) ? `<button type="button" class="btn-small" data-reset="${store}:${id}">Cofnij przesunięcie</button>` : ''}
         ${onShowInMap ? `<button type="button" class="btn-small" data-mapa="${store}:${id}">W Mapie</button>` : ''}
         <button type="button" class="btn-small btn-danger" data-usun="${store}:${id}">Usuń</button>
@@ -895,10 +915,92 @@ export function createPlanView(containerId) {
       const nowy = rec.pr_chodnik === undefined || rec.pr_chodnik === '';
       await nadzorUpdate(store, { ...rec, pr_chodnik: n.id, pr_naped_m: n.m, ...(nowy ? { pr_od_m: n.m, pr_do_m: len } : {}), plan_dx: 0, plan_dy: 0 });
     } else {
-      await nadzorUpdate(store, { ...rec, lok_chodnik: n.id, lok_metraz: n.m, lok_strona: n.strona, plan_dx: 0, plan_dy: 0 });
+      await nadzorUpdate(store, { ...rec, lok_chodnik: n.id, lok_metraz: n.m, lok_strona: n.strona, lok_przy: '', plan_dx: 0, plan_dy: 0 });
     }
     await wczytajDane();
     render();
+  }
+
+  // opis chodnika: "nr 2 Chodnik 1 (odstawczy)"
+  const opisChodnika = (ch) => (ch ? [ch.ch_nr ? `nr ${ch.ch_nr}` : '', ch.ch_nazwa || '', ch.ch_rodzaj ? `(${ch.ch_rodzaj})` : ''].filter(Boolean).join(' ') : '');
+  const chodnikNapedu = (pr) => rozwiaz(pr?.pr_chodnik, dane.chodniki || [], 'ch_nazwa');
+
+  // ---------- umiejscowienie przy obiekcie (05.11.2026) ----------
+  const MOZE_STAC_PRZY = new Set(['urzadzenia', 'transformatory', 'kb']);
+  const MAGAZYNY_PRZY = ['przenosniki', 'urzadzenia', 'kb', 'transformatory', 'rozdzielnie'];
+  function opisObiektu(store, rec) {
+    if (store === 'przenosniki') {
+      const ch = chodnikNapedu(rec);
+      return `napędzie przenośnika ${rec.pr_nr ?? ''}${ch ? ` (${opisChodnika(ch)})` : ''}`;
+    }
+    if (store === 'rozdzielnie') return `rozdzielni ${rec.nazwa_r ?? ''}`;
+    if (store === 'transformatory') return `transformatorze ${rec.t_nr ?? ''}`;
+    if (store === 'kb') return `kombajnie ${rec.kb_nazwa ?? ''}`;
+    return `${jestOdbiornik(rec) ? 'urządzeniu' : 'wyłączniku'} ${rec.nazwa ?? ''}`;
+  }
+  // [{ wartosc: 'magazyn:id', opis }] — najpierw to, co element zasila, potem jego źródło, potem reszta;
+  // bez niego samego i bez obiektów, które już stoją przy nim (pętla)
+  function opcjePrzy(store, id) {
+    const ja = store && id !== undefined ? `${store}:${id}` : null;
+    const pol = polaczenia().wynik;
+    const zasila = new Set(ja ? pol.filter((p) => `${p.zrodlo.store}:${p.zrodlo.rec.id}` === ja).map((p) => `${p.cel.store}:${p.cel.rec.id}`) : []);
+    const zrodlo = ja ? pol.find((p) => `${p.cel.store}:${p.cel.rec.id}` === ja && p.prefiks !== 'kabel_rez') : null;
+    const stojaPrzyMnie = (k, d = 0) => {
+      if (!ja || d > 6) return false;
+      const [s0, i0] = k.split(':');
+      const r = (dane[s0] || []).find((x) => x.id === Number(i0));
+      if (!r?.lok_przy) return false;
+      return r.lok_przy === ja || stojaPrzyMnie(r.lok_przy, d + 1);
+    };
+    const wszystkie = [];
+    for (const m of MAGAZYNY_PRZY) {
+      for (const r of dane[m] || []) {
+        const k = `${m}:${r.id}`;
+        if (k === ja || stojaPrzyMnie(k)) continue;
+        const ranga = zasila.has(k) ? 0 : zrodlo && k === `${zrodlo.zrodlo.store}:${zrodlo.zrodlo.rec.id}` ? 1 : 2;
+        wszystkie.push({ wartosc: k, opis: `${ranga === 0 ? 'zasila: ' : ranga === 1 ? 'źródło: ' : ''}przy ${opisObiektu(m, r)}`, ranga });
+      }
+    }
+    return wszystkie.sort((a, b) => a.ranga - b.ranga || a.opis.localeCompare(b.opis, 'pl'));
+  }
+
+  function pokazUmiejscowienie(store, id) {
+    const rec = (dane[store] || []).find((r) => r.id === id);
+    if (!rec) return;
+    zamknijKarte();
+    const opcje = opcjePrzy(store, id);
+    dodajEl.dataset.tryb = 'umiejscowienie';
+    dodajEl.dataset.cel = `${store}:${id}`;
+    dodajEl.innerHTML = `
+      <h4>Umiejscowienie: ${esc(opisRek(store, rec))}</h4>
+      <div class="plan-dodaj-pola">
+        <label>Stoi przy
+          <select name="przy"><option value="">— na chodniku (metraż; ustaw przyciskiem Przestaw) —</option>${opcjeSelect(opcje, null, rec.lok_przy || '')}</select>
+        </label>
+        <label>Strona
+          <select name="strona">${['lewa', 'prawa'].map((o) => `<option ${o === (rec.lok_strona || 'prawa') ? 'selected' : ''}>${o}</option>`).join('')}</select>
+        </label>
+      </div>
+      <p class="plan-dodaj-uwaga">Np. wyłącznik napędowy przy napędzie, który zasila. Element stanie przy wskazanym obiekcie i będzie się przesuwał razem z nim. Na górze listy: to, co element zasila, i jego źródło. Strona ma znaczenie, gdy obiekt stoi na osi chodnika (napęd, kombajn).</p>
+      <div class="form-actions">
+        <button type="submit" class="btn-small btn-primary">Zapisz</button>
+        <button type="button" class="btn-small" data-akcja="anuluj-dodawanie">Anuluj</button>
+      </div>`;
+    dodajEl.classList.remove('hidden');
+    dodajEl.scrollIntoView({ block: 'nearest' });
+  }
+
+  async function zapiszUmiejscowienie() {
+    const f = new FormData(dodajEl);
+    const [store, id] = String(dodajEl.dataset.cel || '').split(':');
+    const rec = (await nadzorGetAll(store)).find((r) => r.id === Number(id));
+    if (!rec) return;
+    const przy = String(f.get('przy') || '');
+    await nadzorUpdate(store, { ...rec, lok_przy: przy, ...(przy ? { lok_strona: f.get('strona') || 'prawa', plan_dx: 0, plan_dy: 0 } : {}) });
+    zamknijDodawanie();
+    await wczytajDane();
+    render();
+    if (!przy && !lokalizacja(store, { ...rec, lok_przy: '' })) zacznijStawianie(store, Number(id));
   }
 
   // ---------- edycja układu: dodawanie, zasilanie, odpływ, usuwanie ----------
@@ -1125,6 +1227,9 @@ export function createPlanView(containerId) {
         ${odplywy.length ? `<label>Odpływ do
           <select name="odplyw">${opcjeSelect(odplywy, '— nie podaję —')}</select>
         </label>` : ''}
+        ${MOZE_STAC_PRZY.has(rodzaj.store) ? `<label>Stoi przy
+          <select name="przy"><option value="">— kliknę na planie —</option>${odplywy.length ? '<option value="__odplyw">przy elemencie z pola „Odpływ do”</option>' : ''}${opcjeSelect(opcjePrzy(), null)}</select>
+        </label>` : ''}
       </div>
       <p class="plan-dodaj-uwaga">${esc(rodzaj.uwaga)} ${jestPole ? 'Pole stanie przy swojej rozdzielni.' : 'Po zapisie kliknij na planie przy chodniku, gdzie stoi element — metraż i strona wpiszą się same.'} Kabel (typ, przekrój, długość) uzupełnisz później w formularzu.</p>
       <div class="form-actions">
@@ -1150,6 +1255,12 @@ export function createPlanView(containerId) {
     if (rodzaj.id === 'poleRozdzielcze') rec.miejsce_zabudowy = Number(f.get('rozdzielnia'));
     const [pole, , idZr] = String(f.get('zrodlo') || '').split('|');
     if (idZr && pole !== 'przelot') rec[pole] = Number(idZr);
+    let przy = String(f.get('przy') || '');
+    if (przy === '__odplyw') {
+      const [cs, ci] = String(f.get('odplyw') || '').split('|');
+      przy = ci ? `${cs}:${ci}` : '';
+    }
+    if (przy) Object.assign(rec, { lok_przy: przy, lok_strona: 'prawa' });
     const noweId = await nadzorAdd(store, rec);
     if (idZr && pole === 'przelot') {
       // rozdzielnia zasilona przelotem: jej pole zasilające z kablem od pola źródłowego
@@ -1163,7 +1274,7 @@ export function createPlanView(containerId) {
     zamknijDodawanie();
     await wczytajDane();
     render();
-    if (store !== 'poleRozdzielcze') zacznijStawianie(store, noweId);
+    if (store !== 'poleRozdzielcze' && !przy) zacznijStawianie(store, noweId);
   }
 
   // zmiana zasilania (i rodzaju urządzenia) istniejącego elementu
@@ -1280,6 +1391,7 @@ export function createPlanView(containerId) {
   dodajEl.addEventListener('submit', (e) => {
     e.preventDefault();
     if (dodajEl.dataset.tryb === 'zasilanie') zapiszZasilanie();
+    else if (dodajEl.dataset.tryb === 'umiejscowienie') zapiszUmiejscowienie();
     else zapiszDodawanie();
   });
 
@@ -1288,11 +1400,11 @@ export function createPlanView(containerId) {
   async function wczytajPrzyklad() {
     const P = { _przyklad: MARKER_PRZYKLADU, zrodlo_danych: 'ręcznie' };
     const dodaj = (store, rec) => nadzorAdd(store, { ...P, ...rec });
-    const ch1 = await dodaj('chodniki', { ch_nazwa: 'Chodnik 1', ch_azymut: 90, ch_dlugosc: 320, ch_w_drazeniu: 'nie' });
-    const ch2 = await dodaj('chodniki', { ch_nazwa: 'Przecinka 2', ch_od_chodnika: ch1, ch_od_metraz: 320, ch_azymut: 180, ch_dlugosc: 150, ch_w_drazeniu: 'nie' });
-    const ch3 = await dodaj('chodniki', { ch_nazwa: 'Chodnik 3', ch_od_chodnika: ch2, ch_od_metraz: 150, ch_azymut: 90, ch_dlugosc: 190, ch_w_drazeniu: 'nie' });
-    const ch4 = await dodaj('chodniki', { ch_nazwa: 'Chodnik 4', ch_od_chodnika: ch3, ch_od_metraz: 190, ch_azymut: 180, ch_dlugosc: 140, ch_w_drazeniu: 'nie' });
-    const ch5 = await dodaj('chodniki', { ch_nazwa: 'Chodnik 5 (przodek)', ch_od_chodnika: ch4, ch_od_metraz: 140, ch_azymut: 148, ch_dlugosc: 320, ch_w_drazeniu: 'tak' });
+    const ch1 = await dodaj('chodniki', { ch_nazwa: 'Chodnik 1', ch_nr: '1', ch_rodzaj: 'transportowy', ch_azymut: 90, ch_dlugosc: 320, ch_w_drazeniu: 'nie' });
+    const ch2 = await dodaj('chodniki', { ch_nazwa: 'Przecinka 2', ch_nr: '2', ch_rodzaj: 'przecinka', ch_od_chodnika: ch1, ch_od_metraz: 320, ch_azymut: 180, ch_dlugosc: 150, ch_w_drazeniu: 'nie' });
+    const ch3 = await dodaj('chodniki', { ch_nazwa: 'Chodnik 3', ch_nr: '3', ch_rodzaj: 'odstawczy', ch_od_chodnika: ch2, ch_od_metraz: 150, ch_azymut: 90, ch_dlugosc: 190, ch_w_drazeniu: 'nie' });
+    const ch4 = await dodaj('chodniki', { ch_nazwa: 'Chodnik 4', ch_nr: '4', ch_rodzaj: 'odstawczy', ch_od_chodnika: ch3, ch_od_metraz: 190, ch_azymut: 180, ch_dlugosc: 140, ch_w_drazeniu: 'nie' });
+    const ch5 = await dodaj('chodniki', { ch_nazwa: 'Chodnik 5 (przodek)', ch_nr: '5', ch_rodzaj: 'dowierzchnia', ch_od_chodnika: ch4, ch_od_metraz: 140, ch_azymut: 148, ch_dlugosc: 320, ch_w_drazeniu: 'tak' });
     const r = await dodaj('rozdzielnie', { nazwa_r: 'R-650', r_napiecie: '6 kV', lok_chodnik: ch1, lok_metraz: 0, lok_strona: 'lewa' });
     const p1 = await dodaj('poleRozdzielcze', { p_nazwa: 'R-650 pole 1', miejsce_zabudowy: r });
     const p2 = await dodaj('poleRozdzielcze', { p_nazwa: 'R-650 pole 2', miejsce_zabudowy: r });
@@ -1447,6 +1559,10 @@ export function createPlanView(containerId) {
     if (t.dataset.edytuj && onEditRecord) {
       const [store, id] = t.dataset.edytuj.split(':');
       onEditRecord(store, Number(id));
+    }
+    if (t.dataset.umiejscowienie) {
+      const [store, id] = t.dataset.umiejscowienie.split(':');
+      pokazUmiejscowienie(store, Number(id));
     }
     if (t.dataset.postaw) {
       const [store, id] = t.dataset.postaw.split(':');
@@ -1639,5 +1755,5 @@ export function createPlanView(containerId) {
     return true;
   }
 
-  return { init, pokaz, _test: { problemTypu, napieciaDoWyboru, katalog: () => katalog, zrodlaDla, odplywyDla, zgodnePolaczenie, problemyPolaczenia, rodzajPolaczenia, opcjeNapieciaFormularza, napiecieEfektywne, kilkaOdplywow, polaczenia: () => polaczenia().wynik, wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
+  return { init, pokaz, _test: { opisChodnika, opcjePrzy, pozycje: () => rysuj(widok, { szer: 1000, wys: 700 }).poz, problemTypu, napieciaDoWyboru, katalog: () => katalog, zrodlaDla, odplywyDla, zgodnePolaczenie, problemyPolaczenia, rodzajPolaczenia, opcjeNapieciaFormularza, napiecieEfektywne, kilkaOdplywow, polaczenia: () => polaczenia().wynik, wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
 }

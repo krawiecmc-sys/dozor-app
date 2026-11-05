@@ -434,9 +434,17 @@ export async function importAllData(data, entities = null) {
     if (entities) {
       for (const [storeName, noweId, rest] of dodane) {
         const pola = (entities[storeName]?.fields || []).filter((f) => f.refStore && (f.type === 'fk-or-free' || f.type === 'fk-multi'));
-        if (!pola.length) continue;
         const nowy = { ...rest, id: noweId };
         let zmiana = false;
+        // 05.11.2026: umiejscowienie "przy obiekcie" (lok_przy = 'magazyn:id')
+        if (typeof nowy.lok_przy === 'string' && nowy.lok_przy.includes(':')) {
+          const [ms, mi] = nowy.lok_przy.split(':');
+          const nid = mapa[ms]?.get(Number(mi));
+          nowy.lok_przy = nid !== undefined ? `${ms}:${nid}` : '';
+          if (nid !== undefined) summary.przepietePowiazania += 1; else summary.bezCelu += 1;
+          zmiana = true;
+        }
+        if (!pola.length && !zmiana) continue;
         for (const f of pola) {
           const m = mapa[f.refStore];
           const v = nowy[f.key];
