@@ -248,7 +248,7 @@ try {
   ok(pow('W-05') === '' && pow('W-1') === '', 'dwunapięciowy 6/0,5/1 kV zasila wyłączniki 0,5 kV i 1 kV bez uwag');
   ok(pow('W-bez').includes('dwunapięciowe'), `wyłącznik bez napięcia z dwunapięciowego: prośba o wybór (${pow('W-bez')})`);
   ok(pow('W-zle').includes('źródło daje 1 kV'), `wyłącznik 0,5 kV z trafo 6/1 kV: niezgodne napięcie (${pow('W-zle')})`);
-  ok(pow('Silnik-8').includes('źródło daje 0,5 kV') && pow('Pompa-8') === '' && pow('W-przelot') === '', 'napięcie dziedziczone przez wyłącznik: silnik 1 kV z wyłącznika 0,5 kV niezgodny, pompa 0,5 kV i przelot 0,5 kV zgodne');
+  ok(pow('Silnik-8').includes('wyłącznik daje 0,5 kV') && pow('Pompa-8') === '' && pow('W-przelot') === '', 'napięcie dziedziczone przez wyłącznik: silnik 1 kV z wyłącznika 0,5 kV niezgodny, pompa 0,5 kV i przelot 0,5 kV zgodne');
   ok(pow('PRZ-8a') === '' && pow('PRZ-8b').includes('tylko dwa przyłącza'), `strona pierwotna: drugi przelot z transformatora oznaczony (${pow('PRZ-8b')})`);
   ok(!T.zrodlaDla('transformatory').some((o) => o.wartosc === `zasilany_z_transformatora|transformatory|${T8}`), 'trafo z przelotem nie jest proponowany jako źródło kolejnego przelotu');
   ok(T.zrodlaDla('transformatory', { store: 'transformatory', id: T9a }).some((o) => o.wartosc === `zasilany_z_transformatora|transformatory|${T9}`) && !T.zrodlaDla('transformatory').some((o) => o.wartosc === `zasilany_z_transformatora|transformatory|${T9}`), 'przy edycji transformatora zasilanego przelotem jego obecne źródło zostaje na liście');
@@ -385,6 +385,19 @@ try {
   ok(T.zrodlaDla('maszyny').every((o) => o.wartosc.includes('|urzadzenia|')), 'maszynę może zasilać tylko wyłącznik / aparat');
   const eksM = await db.exportAllData('tM');
   ok(Array.isArray(eksM.nadzor?.maszyny) && eksM.nadzor.maszyny.some((r) => r.m_nazwa === 'WD-1'), 'maszyny w kopii (eksport)');
+  // 15b) Napięcie urządzeń końcowych i silników (05.11.2026)
+  const S1 = await db.nadzorAdd('silniki', { nazwa_silnika: 'S-1kV', napiecie_zas: '1 kV' });
+  const S2 = await db.nadzorAdd('silniki', { nazwa_silnika: 'S-przel', napiecie_zas: '0,5/1 kV' });
+  const S3 = await db.nadzorAdd('silniki', { nazwa_silnika: 'S-05', napiecie_zas: '0,5 kV' });
+  const MW05 = await db.nadzorAdd('maszyny', { m_nazwa: 'ŁD-05', m_rodzaj: 'ładowarka', nap_zas: '0,5 kV', zasilany_z_urzadzenia: WP, silniki: [S1, S2] });
+  const mwRec = (await db.nadzorGetAll('maszyny')).find((r) => r.id === MW);
+  await db.nadzorUpdate('maszyny', { ...mwRec, silniki: [S1, S2, S3] });
+  await plan.init({});
+  const pS = T.problemySilnikow().map((x) => x.pow).join(' | ');
+  ok(pS.includes('S-05') && !pS.includes('S-przel') && (pS.match(/S-1kV/g) || []).length === 0, `silniki w WD-1 (1 kV): 0,5 kV niezgodny, 1 kV i przełączalny 0,5/1 kV zgodne (${pS})`);
+  const polL = T.polaczenia().find((p) => p.cel.store === 'maszyny' && p.cel.rec.id === MW05);
+  ok(T.problemyPolaczenia(polL).join(' ').includes('wyłącznik daje 1 kV'), 'maszyna 0,5 kV z wyłącznika 1 kV — niezgodne napięcie urządzenia końcowego');
+  ok(document.querySelector('#plan-braki')?.textContent.includes('Silniki z napięciem niezgodnym z zasilaniem'), 'lista silników niezgodnych pod planem');
   // 16) Zakładki Nadzoru: Wyłączniki / Odbiorniki końcowe jako widoki jednego magazynu (05.11.2026)
   document.body.insertAdjacentHTML('beforeend', '<nav id="tz-tabs"></nav><div id="tz-list"></div><div id="tz-form" class="hidden"></div><button id="tz-add">+</button>');
   const { createCrudModule } = await import('./js/crud-module.js');

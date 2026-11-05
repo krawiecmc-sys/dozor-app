@@ -360,11 +360,27 @@ async function pokazWMapie(entityKey, id) {
   el.scrollIntoView({ block: 'center' });
 }
 
+// 05.11.2026: zakładka Rejon = Plan rejonu albo Graf zasilania (ostatnio wybrany widok)
+const rejonWidokEl = document.getElementById('rejon-widok-switch');
+const ostatniWidokRejonu = () => { try { return localStorage.getItem('protektor-rejon-widok') === 'graf' ? 'graf' : 'plan'; } catch { return 'plan'; } };
+rejonWidokEl.addEventListener('click', async (event) => {
+  const btn = event.target.closest('[data-widok]');
+  if (!btn) return;
+  switchNadzorSub(btn.dataset.widok);
+  await refreshActiveNadzorSub();
+});
+
 function switchNadzorSub(subName) {
+  if (subName === 'rejon') subName = ostatniWidokRejonu();
+  const wRejonie = subName === 'plan' || subName === 'graf';
+  if (wRejonie) { try { localStorage.setItem('protektor-rejon-widok', subName); } catch {} }
+  rejonWidokEl.classList.toggle('hidden', !wRejonie);
+  rejonWidokEl.querySelectorAll('[data-widok]').forEach((b) => b.classList.toggle('active', b.dataset.widok === subName));
   nadzorSubSwitchEl.querySelectorAll('.section-btn').forEach((b) => {
-    b.classList.toggle('active', b.dataset.sub === subName);
+    const aktywny = b.dataset.sub === subName || (b.dataset.sub === 'rejon' && wRejonie);
+    b.classList.toggle('active', aktywny);
     // aktywna zakladka widoczna w przewijanym pasku (przewija pasek, nie strone)
-    if (b.dataset.sub === subName) {
+    if (aktywny) {
       const nav = nadzorSubSwitchEl, l = b.offsetLeft, r = l + b.offsetWidth;
       if (l < nav.scrollLeft) nav.scrollLeft = l;
       else if (r > nav.scrollLeft + nav.clientWidth) nav.scrollLeft = r - nav.clientWidth;

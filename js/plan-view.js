@@ -19,7 +19,7 @@
 
 import { nadzorGetAll, nadzorUpdate, nadzorAdd, nadzorDelete } from './db.js';
 import { NADZOR_ENTITIES, U_RODZAJE } from './nadzor-entities.js';
-import { KOLOR, kolorNapiecia, kv, symbolSvg, napiecieRekordu, napieciaWtorne, rowneKV } from './symbole.js';
+import { KOLOR, kolorNapiecia, kv, symbolSvg, napiecieRekordu, napieciaWtorne, rowneKV, napiecieSieci } from './symbole.js';
 import { wczytajKatalog, zapiszKatalog, typAparatu, NAPIECIA_KATALOGU } from './katalog-aparatow.js';
 import { ZASILANIE, jestOdbiornik, KONCOWE, rozwiaz, rodzajRek, polaczenia as polaczeniaSieci, zrodloRek as zrodloSieci, rodzajPolaczenia as rodzajPolaczeniaSieci, rejonySieci, MAGAZYNY_REJONU } from './siec-zasilania.js';
 
@@ -183,7 +183,7 @@ export function createPlanView(containerId, ustawienia = {}) {
   // ---------- dane i geometria ----------
 
   async function wczytajDane() {
-    const magazyny = ['chodniki', 'przenosniki', 'rozdzielnie', 'poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb', 'maszyny'];
+    const magazyny = ['chodniki', 'przenosniki', 'rozdzielnie', 'poleRozdzielcze', 'transformatory', 'urzadzenia', 'kb', 'maszyny', 'silniki'];
     const wyniki = await Promise.all(magazyny.map((m) => nadzorGetAll(m)));
     dane = Object.fromEntries(magazyny.map((m, i) => [m, wyniki[i]]));
     katalog = await wczytajKatalog();
@@ -903,6 +903,7 @@ export function createPlanView(containerId, ustawienia = {}) {
       blok('Przenośniki bez chodnika', przenBez.map((rec) => `<li>${esc(nazwa('przenosniki', rec))} <button type="button" class="btn-small" data-edytuj="przenosniki:${rec.id}">Edytuj</button></li>`)),
       blok('Połączenia bez opisu kabla', bezKabla.map((k) => `<li>${esc(nazwa(k.zrodlo.store, k.zrodlo.rec))} → ${esc(nazwa(k.cel.store, k.cel.rec))}${k.prefiks === 'kabel_rez' ? ' (rezerwowe)' : ''} <button type="button" class="btn-small" data-edytuj="${k.cel.store}:${k.cel.rec.id}">Uzupełnij kabel</button></li>`)),
       blok('Połączenia niezgodne z układem zasilania', niezgodne.map(({ k, pow }) => `<li>${esc(nazwa(k.zrodlo.store, k.zrodlo.rec))} → ${esc(nazwa(k.cel.store, k.cel.rec))}: ${esc(pow.join('; '))} <button type="button" class="btn-small" data-zasilanie="${k.cel.store}:${k.cel.rec.id}">Zmień zasilanie</button></li>`)),
+      blok('Silniki z napięciem niezgodnym z zasilaniem', problemySilnikow().map(({ s, pow }) => `<li>${esc(pow)} <button type="button" class="btn-small" data-edytuj="silniki:${s.id}">Edytuj silnik</button></li>`)),
       blok('Urządzenia z napięciem niezgodnym z typem', zlyTyp.map(({ rec, pow }) => `<li>${esc(nazwa('urzadzenia', rec))}: ${esc(pow)} <button type="button" class="btn-small" data-edytuj="urzadzenia:${rec.id}">Edytuj</button></li>`)),
       blok('Do sprawdzenia: wyłącznik z kilkoma odpływami do urządzeń końcowych (zwykle jeden)', doSprawdzenia.map(({ rec, cele }) => `<li>${esc(nazwa('urzadzenia', rec))} → ${esc(cele.join(', '))}</li>`)),
       blok('Kable nienarysowane (jeden z końców bez położenia)', niewidoczne.map((k) => `<li>${esc(nazwa(k.zrodlo.store, k.zrodlo.rec))} → ${esc(nazwa(k.cel.store, k.cel.rec))}</li>`)),
@@ -1220,14 +1221,38 @@ export function createPlanView(containerId, ustawienia = {}) {
   // przeloty po stronie pierwotnej transformatora (do transformatora albo aparatu 6 kV)
   const przelotyPierwotne = (trafoId, pol) => pol.filter((p) => p.zrodlo.store === 'transformatory' && p.zrodlo.rec.id === trafoId && rodzajPolaczenia(p) === 'przelot');
 
+  // 05.11.2026 (Piotr): napięcie zasilania zawsze zgodne z urządzeniem zasilającym i sterującym; urządzenia końcowe
+  // (odbiornik, KB, maszyna, napęd) w 99% jednonapięciowe — ich napięcie = napięcie wyłącznika
   function problemNapiecia(p) {
-    if (p.cel.store !== 'urzadzenia') return null;
+    if (!['urzadzenia', 'kb', 'maszyny', 'przenosniki'].includes(p.cel.store)) return null;
     const o = opcjeOd(p.zrodlo.store, p.zrodlo.rec, p.cel.store, p.cel.rec);
     if (!o) return null;
     const v = kv(p.cel.rec.nap_zas);
     if (v === null) return o.length > 1 ? `źródło dwunapięciowe (${o.map(fmtKV).join(' / ')}) — wybierz napięcie urządzenia` : null;
-    if (!o.some((x) => rowneKV(x, v))) return `urządzenie ${fmtKV(v)}, a źródło daje ${o.map(fmtKV).join(' albo ')}`;
+    if (!o.some((x) => rowneKV(x, v))) return `${p.cel.store === 'urzadzenia' ? 'urządzenie' : 'urządzenie końcowe'} ${fmtKV(v)}, a ${p.zrodlo.store === 'urzadzenia' ? 'wyłącznik' : 'źródło'} daje ${o.map(fmtKV).join(' albo ')}`;
     return null;
+  }
+
+  // Silniki (05.11.2026): jednonapięciowy (1 kV / 0,5 kV) albo przełączalny 0,5/1 kV; musi pasować do napięcia,
+  // na którym pracuje maszyna (z wyłącznika; gdy brak zasilania w bazie — wpisane napięcie maszyny).
+  const napieciaSilnika = (s) => String(s?.napiecie_zas || '').split('/').map((x) => kv(x)).filter((x) => x !== null).map(napiecieSieci);
+  const SILNIKI_W = ['kb', 'maszyny', 'przenosniki', 'urzadzenia'];
+  function problemySilnikow() {
+    const wynik = [];
+    for (const st of SILNIKI_W) {
+      for (const rec of dane[st] || []) {
+        if (!Array.isArray(rec.silniki) || !rec.silniki.length || ukryty(st, rec)) continue;
+        const v = napiecieEfektywne(st, rec) ?? kv(rec.nap_zas);
+        if (v === null || v === undefined) continue;
+        for (const id of rec.silniki) {
+          const s = (dane.silniki || []).find((x) => x.id === id);
+          const nap = napieciaSilnika(s);
+          if (!s || !nap.length || nap.some((x) => rowneKV(x, v))) continue;
+          wynik.push({ st, rec, s, pow: `silnik ${s.nazwa_silnika || '#' + s.id} (${s.napiecie_zas}${nap.length > 1 ? ', przełączalny' : ''}) w ${opisObiektu(st, rec)}, a zasilanie ${fmtKV(v)}` });
+        }
+      }
+    }
+    return wynik;
   }
 
   // wszystkie powody niezgodności: reguła układu, napięcie, strona pierwotna transformatora (zasilanie + 1 przelot)
@@ -1915,6 +1940,15 @@ export function createPlanView(containerId, ustawienia = {}) {
     onEditRecord = opts.onEditRecord || null;
     onShowInMap = opts.onShowInMap || null;
     onPokazWInnymWidoku = opts.onPokazWInnymWidoku || null;
+    // plan i graf to jedna zakładka Rejon — wybór rejonu, oddziału i warstw wspólny dla obu widoków
+    try {
+      mojRejon = localStorage.getItem('protektor-plan-rejon') || 'wszystkie';
+      mojOddzial = localStorage.getItem('protektor-plan-oddzial') || 'wszystkie';
+      warstwy = { ...WARSTWY_DOMYSLNE, ...JSON.parse(localStorage.getItem('protektor-plan-warstwy') || '{}') };
+      const sel = container.querySelector('[data-akcja-oddzial]');
+      if (sel) sel.value = mojOddzial;
+      container.querySelectorAll('[data-warstwa]').forEach((c) => { c.checked = !!warstwy[c.dataset.warstwa]; });
+    } catch {}
     await wczytajDane();
     render();
   }
@@ -1952,5 +1986,5 @@ export function createPlanView(containerId, ustawienia = {}) {
     return true;
   }
 
-  return { init, pokaz, _test: { ukladSchematu, tryb, rejony, obcyRejon, ustawRejon: (r, pokazInne = true) => { mojRejon = r; warstwy.inneOddzialy = pokazInne; }, oddzialRek, ustawOddzial: (o, pokazInne = true) => { mojOddzial = o; warstwy.inneOddzialy = pokazInne; }, opisChodnika, opcjePrzy, pozycje: () => rysuj(widok, { szer: 1000, wys: 700 }).poz, problemTypu, napieciaDoWyboru, katalog: () => katalog, zrodlaDla, odplywyDla, zgodnePolaczenie, problemyPolaczenia, rodzajPolaczenia, opcjeNapieciaFormularza, napiecieEfektywne, kilkaOdplywow, polaczenia: () => polaczenia().wynik, wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
+  return { init, pokaz, _test: { problemySilnikow, problemNapiecia, ukladSchematu, tryb, rejony, obcyRejon, ustawRejon: (r, pokazInne = true) => { mojRejon = r; warstwy.inneOddzialy = pokazInne; }, oddzialRek, ustawOddzial: (o, pokazInne = true) => { mojOddzial = o; warstwy.inneOddzialy = pokazInne; }, opisChodnika, opcjePrzy, pozycje: () => rysuj(widok, { szer: 1000, wys: 700 }).poz, problemTypu, napieciaDoWyboru, katalog: () => katalog, zrodlaDla, odplywyDla, zgodnePolaczenie, problemyPolaczenia, rodzajPolaczenia, opcjeNapieciaFormularza, napiecieEfektywne, kilkaOdplywow, polaczenia: () => polaczenia().wynik, wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
 }

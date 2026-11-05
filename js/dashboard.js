@@ -264,7 +264,7 @@ export async function renderDashboard(containerId, { onEditRecord, onShowOnPlan 
     { label: 'Urządzenia', entityKey: 'urzadzenia', records: urzadzenia.filter((r) => !usedIds.urzadzenia.has(r.id)), titleField: 'nazwa' },
     { label: 'KB', entityKey: 'kb', records: kb.filter((r) => !usedIds.kb.has(r.id)), titleField: 'kb_nazwa' },
     { label: 'Maszyny', entityKey: 'maszyny', records: maszyny.filter((r) => !usedIds.maszyny.has(r.id)), titleField: 'm_nazwa' },
-    { label: 'Silniki (nieprzypisane do KB ani maszyny)', entityKey: 'silniki', records: silniki.filter((r) => !usedIds.silniki.has(r.id)), titleField: 'nazwa_silnika' },
+    { label: 'Silniki (nieprzypisane do żadnej maszyny)', entityKey: 'silniki', records: silniki.filter((r) => !usedIds.silniki.has(r.id) && ![...urzadzenia, ...maszyny, ...kb].some((x) => Array.isArray(x.silniki) && x.silniki.includes(r.id))), titleField: 'nazwa_silnika' },
     { label: 'Czujniki (nieprzypisane do żadnego KB)', entityKey: 'czujniki', records: czujniki.filter((r) => !usedIds.czujniki.has(r.id)), titleField: 'nazwa_czujnik' },
   ].filter((g) => g.records.length > 0);
 

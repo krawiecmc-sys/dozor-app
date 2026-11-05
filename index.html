@@ -45,11 +45,16 @@
 <section id="section-dashboard">
   <nav id="nadzor-sub-switch" class="section-switch section-switch-secondary">
     <button class="section-btn active" data-sub="dashboard">Mapa rejonu</button>
-    <button class="section-btn" data-sub="graf">Graf zasilania</button>
-    <button class="section-btn" data-sub="plan">Plan rejonu</button>
-    <button class="section-btn" data-sub="crud">Rejon</button>
+    <button class="section-btn" data-sub="rejon">Rejon</button>
+    <button class="section-btn" data-sub="crud">Baza urządzeń</button>
     <button class="section-btn" data-sub="ougwug">Przegląd OUG/WUG</button>
     <button class="section-btn" data-sub="diagnostyka">Diagnostyka</button>
+  </nav>
+
+  <!-- 05.11.2026: Rejon = Plan rejonu (teren) + Graf zasilania (schemat) — jedna sieć, dwa widoki -->
+  <nav id="rejon-widok-switch" class="section-switch section-switch-secondary rejon-widok hidden">
+    <button class="section-btn" data-widok="plan">Plan rejonu (teren)</button>
+    <button class="section-btn" data-widok="graf">Graf zasilania (schemat)</button>
   </nav>
 
   <div id="nadzor-crud-area" class="hidden">
