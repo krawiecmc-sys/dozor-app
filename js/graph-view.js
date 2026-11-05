@@ -17,7 +17,7 @@
 // więc nic więcej nie było potrzebne.
 
 import { nadzorGetAll } from './db.js';
-import { KOLOR, kolorNapiecia, symbolSvg, napiecieRekordu } from './symbole.js';
+import { KOLOR, kolorNapiecia, symbolSvg, napiecieRekordu, napieciaWtorne, rowneKV, kv } from './symbole.js';
 
 // 03.11.2026: węzeł ma symbol wg PN-EN 60617 i pasek w kolorze napięcia, strzałka — kolor napięcia zasilania (jak Plan rejonu).
 const SYMBOL_TYPU = { rozdzielnie: 'rozdzielnia', poleRozdzielcze: 'pole', transformatory: 'transformator', urzadzenia: 'urzadzenie', kb: 'kombajn', silniki: 'naped', czujniki: 'czujnik' };
@@ -288,7 +288,14 @@ export function createGraphView(containerId) {
           const y2 = do_.y;
           const midY = (y1 + y2) / 2;
           const rOd = znajdzRekord(k.od.typ, k.od.id);
-          const napOd = napiecieRekordu(k.od.typ, rOd, dane.rozdzielnie || [])[1];
+          let napOd = napiecieRekordu(k.od.typ, rOd, dane.rozdzielnie || [])[1];
+          if (k.od.typ === 'transformatory') {
+            // 05.11.2026: przelot idzie stroną pierwotną; dwunapięciowy — napięcie odbioru (0,5 albo 1 kV)
+            const rDo = znajdzRekord(k.do.typ, k.do.id);
+            const v = kv(rDo?.nap_zas);
+            if (k.do.typ === 'transformatory' || (v ?? 0) >= 3) napOd = napiecieRekordu(k.od.typ, rOd, dane.rozdzielnie || [])[0];
+            else if (napieciaWtorne(rOd).some((x) => rowneKV(x, v))) napOd = v;
+          }
           const kolor = kolorNapiecia(napOd);
           const nr = [KOLOR.sn, KOLOR.nn1, KOLOR.nn05, KOLOR.obrys].indexOf(kolor);
           return `<path d="M${x1},${y1} C${x1},${midY} ${x2},${midY} ${x2},${y2}" stroke="${kolor}" stroke-width="${napOd >= 3 ? 2.6 : 2}" fill="none" marker-end="url(#graph-arrowhead-${nr < 0 ? 3 : nr})"></path>`;

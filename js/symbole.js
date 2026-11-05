@@ -1,5 +1,5 @@
 // Wspólne symbole i kolory schematów (03.11.2026): Plan rejonu i Graf zasilania.
-// Symbole wg PN-EN 60617, kolor = poziom napięcia (SN czerwony, 1 kV niebieski, ≤ 0,69 kV morski).
+// Symbole wg PN-EN 60617, kolor = poziom napięcia (05.11.2026, Piotr: 6 kV czerwony, 1 kV pomarańczowy, 0,5 kV ciemnożółty).
 
 function rozwiaz(wartosc, rekordy, pole) {
   if (wartosc === undefined || wartosc === null || wartosc === '') return null;
@@ -15,16 +15,24 @@ export const KOLOR = {
   obrys: '#263238',
   aparat: '#eceff1',
   sn: '#c62828', // SN (3–30 kV, w rejonie zwykle 6 kV)
-  nn1: '#1565c0', // nn 1 kV (1000 V)
-  nn05: '#00838f', // nn do 0,69 kV (500 V, 400 V)
+  nn1: '#ef6c00', // nn 1 kV (1000 V) — pomarańczowy
+  nn05: '#c49a00', // nn 0,5 kV (do 0,69 kV: 500 V, 400 V) — ciemnożółty
   przenosnik: '#455a64',
-  drazenie: '#e65100',
+  drazenie: '#6a1b9a', // fiolet — nie myli się z kablem 1 kV
   chodnik: '#e3e7ea',
   chodnikBrzeg: '#9aa7b1',
   tekst: '#1b1b1b',
   tekstChodnika: '#546e7a',
-  zrodlo: { Excel: '#1565c0', 'ręcznie': '#ef6c00', pomiar: '#2e7d32', '': '#90a4ae' },
+  zrodlo: { Excel: '#1565c0', 'ręcznie': '#6d4c41', pomiar: '#2e7d32', '': '#90a4ae' },
 };
+// Strony wtórne transformatora w kV ("6/0,5/1 kV" -> [0.5, 1]); transformator może być dwunapięciowy.
+// Napięcie sieci z napięcia znamionowego/jałowego strony wtórnej: 1,2 kV -> sieć 1 kV, 0,525 / 0,55 kV -> sieć 0,5 kV.
+export const napiecieSieci = (v) => (v === null || v === undefined ? v : v >= 3 ? v : v >= 0.9 ? 1 : v >= 0.45 ? 0.5 : v);
+export function napieciaWtorne(rec) {
+  const cz = String(rec?.t_napiecie || '').split('/').map((x) => kv(x)).filter((x) => x !== null);
+  return cz.length > 1 ? [...new Set(cz.slice(1).map(napiecieSieci))].sort((a, b) => a - b) : [1];
+}
+export const rowneKV = (a, b) => a !== null && b !== null && a !== undefined && b !== undefined && Math.abs(napiecieSieci(a) - napiecieSieci(b)) < 0.01;
 export const kolorNapiecia = (kV) => (kV === null || kV === undefined ? KOLOR.obrys : kV >= 3 ? KOLOR.sn : kV >= 0.9 ? KOLOR.nn1 : KOLOR.nn05);
 
 

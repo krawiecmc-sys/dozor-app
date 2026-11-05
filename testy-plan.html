@@ -221,6 +221,42 @@ try {
   ok(pola7.length === 2 * przed && r20b && r20a.zasilane_z_pola === r10a.id && r20b.zasilane_z_pola === r10b.id, 'import kopii: przelot w kopii wskazuje kopię pola, oryginał bez zmian');
   ok(t902[1].zasilany_z_transformatora === t901[1].id && t901[1].zasilany_z_pola === r10p2[1].id && r10p2[1].miejsce_zabudowy !== r10p2[0].miejsce_zabudowy, 'import kopii: łańcuch trafo i miejsce zabudowy pola przepięte na kopie');
   ok(wImp.przepietePowiazania > 0 && kopie('R-10 pole 4')[1].zasilane_z_pola === 'R-9 p.3', `import kopii: ${wImp.przepietePowiazania} powiązań przepiętych, wpis tekstowy spoza bazy bez zmian`);
+  // 8) Reguły Piotra 05.11.2026: kolory napięć, trafo dwunapięciowe, strona pierwotna (zasilanie + 1 przelot), odpływ przerywany
+  const SYM = await import('./js/symbole.js');
+  const { U_RODZAJE: U_RODZ } = await import('./js/nadzor-entities.js');
+  ok(SYM.kolorNapiecia(6) === '#c62828' && SYM.kolorNapiecia(1) === '#ef6c00' && SYM.kolorNapiecia(0.5) === '#c49a00', 'kolory: 6 kV czerwony, 1 kV pomarańczowy, 0,5 kV ciemnożółty');
+  ok(JSON.stringify(SYM.napieciaWtorne({ t_napiecie: '6/0,5/1 kV' })) === '[0.5,1]' && JSON.stringify(SYM.napieciaWtorne({ t_napiecie: '6/1 kV' })) === '[1]' && JSON.stringify(SYM.napieciaWtorne({ t_napiecie: '6/1,2 kV' })) === '[1]' && JSON.stringify(SYM.napieciaWtorne({ t_napiecie: '6/0,525/1,2 kV' })) === '[0.5,1]' && SYM.rowneKV(1.2, 1), 'strony wtórne: 6/0,5/1 kV -> 0,5 i 1; 1,2 kV -> sieć 1 kV, 0,525 kV -> sieć 0,5 kV');
+  const pole8 = (await db.nadzorGetAll('poleRozdzielcze')).find((r) => r.p_nazwa === 'R-650 pole 1');
+  const t1_8 = (await db.nadzorGetAll('transformatory')).find((r) => r.t_nr === 'It3sb 340');
+  const T8 = await db.nadzorAdd('transformatory', { t_nr: 'DWU-8', t_napiecie: '6/0,5/1 kV', zasilany_z_pola: pole8.id });
+  const T8a = await db.nadzorAdd('transformatory', { t_nr: 'PRZ-8a', t_napiecie: '6/1 kV', zasilany_z_transformatora: T8 });
+  const T8b = await db.nadzorAdd('transformatory', { t_nr: 'PRZ-8b', t_napiecie: '6/1 kV', zasilany_z_transformatora: T8 });
+  const T9 = await db.nadzorAdd('transformatory', { t_nr: 'JED-9', t_napiecie: '6/1 kV', zasilany_z_pola: pole8.id });
+  const T9a = await db.nadzorAdd('transformatory', { t_nr: 'PRZ-9a', t_napiecie: '6/1 kV', zasilany_z_transformatora: T9 });
+  const W05 = await db.nadzorAdd('urzadzenia', { nazwa: 'W-05', u_rodzaj: U_RODZ[0], nap_zas: '0,5 kV', zasilane_z_transformatora: T8 });
+  const W1 = await db.nadzorAdd('urzadzenia', { nazwa: 'W-1', u_rodzaj: U_RODZ[0], nap_zas: '1 kV', zasilane_z_transformatora: T8 });
+  const Wbez = await db.nadzorAdd('urzadzenia', { nazwa: 'W-bez', u_rodzaj: U_RODZ[0], nap_zas: '', zasilane_z_transformatora: T8 });
+  const Wzle = await db.nadzorAdd('urzadzenia', { nazwa: 'W-zle', u_rodzaj: U_RODZ[0], nap_zas: '0,5 kV', zasilane_z_transformatora: t1_8.id });
+  const Wprz = await db.nadzorAdd('urzadzenia', { nazwa: 'W-przelot', u_rodzaj: U_RODZ[0], nap_zas: '0,5 kV', zasilane_z_urzadzenia: W05 });
+  const O1 = await db.nadzorAdd('urzadzenia', { nazwa: 'Pompa-8', u_rodzaj: U_RODZ[1], nap_zas: '0,5 kV', zasilane_z_urzadzenia: W05 });
+  await db.nadzorAdd('urzadzenia', { nazwa: 'Silnik-8', u_rodzaj: U_RODZ[1], nap_zas: '1 kV', zasilane_z_urzadzenia: W05 });
+  await plan.init({});
+  const pol8 = T.polaczenia();
+  const P = (nazwa) => pol8.find((p) => (p.cel.rec.nazwa || p.cel.rec.t_nr) === nazwa);
+  const pow = (nazwa) => T.problemyPolaczenia(P(nazwa), pol8).join(' | ');
+  ok(pow('W-05') === '' && pow('W-1') === '', 'dwunapięciowy 6/0,5/1 kV zasila wyłączniki 0,5 kV i 1 kV bez uwag');
+  ok(pow('W-bez').includes('dwunapięciowe'), `wyłącznik bez napięcia z dwunapięciowego: prośba o wybór (${pow('W-bez')})`);
+  ok(pow('W-zle').includes('źródło daje 1 kV'), `wyłącznik 0,5 kV z trafo 6/1 kV: niezgodne napięcie (${pow('W-zle')})`);
+  ok(pow('Silnik-8').includes('źródło daje 0,5 kV') && pow('Pompa-8') === '' && pow('W-przelot') === '', 'napięcie dziedziczone przez wyłącznik: silnik 1 kV z wyłącznika 0,5 kV niezgodny, pompa 0,5 kV i przelot 0,5 kV zgodne');
+  ok(pow('PRZ-8a') === '' && pow('PRZ-8b').includes('tylko dwa przyłącza'), `strona pierwotna: drugi przelot z transformatora oznaczony (${pow('PRZ-8b')})`);
+  ok(!T.zrodlaDla('transformatory').some((o) => o.wartosc === `zasilany_z_transformatora|transformatory|${T8}`), 'trafo z przelotem nie jest proponowany jako źródło kolejnego przelotu');
+  ok(T.zrodlaDla('transformatory', { store: 'transformatory', id: T9a }).some((o) => o.wartosc === `zasilany_z_transformatora|transformatory|${T9}`) && !T.zrodlaDla('transformatory').some((o) => o.wartosc === `zasilany_z_transformatora|transformatory|${T9}`), 'przy edycji transformatora zasilanego przelotem jego obecne źródło zostaje na liście');
+  ok(JSON.stringify(T.opcjeNapieciaFormularza('wylacznik', `zasilane_z_transformatora|transformatory|${T8}`)) === '["0,5 kV","1 kV"]'
+    && JSON.stringify(T.opcjeNapieciaFormularza('odbiornik', `zasilane_z_urzadzenia|urzadzenia|${W05}`)) === '["0,5 kV"]', 'formularz: napięcia wg źródła (dwunapięciowy: 0,5 i 1; z wyłącznika 0,5 kV: tylko 0,5)');
+  ok(T.rodzajPolaczenia(P('Pompa-8')) === 'odplyw' && T.rodzajPolaczenia(P('W-przelot')) === 'przelot' && T.rodzajPolaczenia(P('W-05')) === 'zasilanie' && T.rodzajPolaczenia(P('PRZ-8a')) === 'przelot', 'rodzaje linii: odpływ do urządzenia końcowego, przelot, zasilanie');
+  ok(T.kilkaOdplywow(pol8).some((w) => w.rec.id === W05 && w.cele.length === 2), 'do sprawdzenia: wyłącznik z dwoma odpływami do urządzeń końcowych');
+  ok(T.zrodlaDla('odbiornik').every((o) => !o.wartosc.includes(`|urzadzenia|${O1}`)), 'urządzenie końcowe nie jest źródłem zasilania');
+  window.__niezgodne = [...document.querySelectorAll('#plan-braki details')].find((d) => d.textContent.includes('niezgodne'))?.textContent || '';
   window.__gotowe = true;
 } catch (e) {
   log.push('WYJĄTEK ' + (e && e.stack || e));

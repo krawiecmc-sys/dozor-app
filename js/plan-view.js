@@ -19,7 +19,7 @@
 
 import { nadzorGetAll, nadzorUpdate, nadzorAdd, nadzorDelete } from './db.js';
 import { NADZOR_ENTITIES, U_RODZAJE } from './nadzor-entities.js';
-import { KOLOR, kolorNapiecia, kv, symbolSvg, napiecieRekordu } from './symbole.js';
+import { KOLOR, kolorNapiecia, kv, symbolSvg, napiecieRekordu, napieciaWtorne, rowneKV } from './symbole.js';
 
 const OBIEKTY = [
   { store: 'rozdzielnie', label: 'Rozdzielnia', title: 'nazwa_r', symbol: 'rozdzielnia' },
@@ -56,6 +56,8 @@ const ZASILANIE = {
 // transformator zasila wyłączniki / aparaty, nie bezpośrednio silniki; wyłącznik zasila kolejny
 // wyłącznik, odbiornik, kombajn albo napęd przenośnika; odbiornik nie zasila niczego.
 const jestOdbiornik = (rec) => String(rec?.u_rodzaj || '').startsWith('odbiornik');
+// urządzenia końcowe układu: nie mają przelotów i nic nie zasilają (05.11.2026)
+const KONCOWE = new Set(['odbiornik', 'kb', 'przenosniki']);
 // rodzaj -> kto może go zasilać: [pole FK, magazyn źródła, rodzaj źródła]
 const ZRODLA_RODZAJU = {
   rozdzielnie: [['przelot', 'poleRozdzielcze', 'poleRozdzielcze']], // tworzy pole zasilające nowej rozdzielni
@@ -79,11 +81,11 @@ const RODZAJE = [
   { id: 'poleRozdzielcze', store: 'poleRozdzielcze', label: 'Pole rozdzielcze', krotko: 'Pole', nazwa: 'p_nazwa', przyklad: 'np. R-650 pole 3',
     zasilanyEtykieta: 'Zasilane z pola (przelot 6 kV)', uwaga: 'Pole zasila transformatory, rzadko aparat 6 kV (SK, APST, APSPa) albo pompę 6 kV; przelotem — pole innej rozdzielni (każda rozdzielnia ma dwa pola zasilające).' },
   { id: 'transformatory', store: 'transformatory', label: 'Transformator', krotko: 'Transformator', nazwa: 't_nr', przyklad: 'np. It3sb 340', nap: { key: 't_napiecie', opcje: ['6/1 kV', '6/0,5 kV', '6/0,5/1 kV'] },
-    zasilanyEtykieta: 'Zasilany z pola', uwaga: 'Transformator zasilany z pola, z przelotu 6 kV innego transformatora albo z aparatu 6 kV; zasila wyłączniki / aparaty i przelotem kolejne transformatory.' },
-  { id: 'wylacznik', store: 'urzadzenia', label: 'Wyłącznik / aparat (WSN, BTH, OSW…)', krotko: 'Wyłącznik', nazwa: 'nazwa', przyklad: 'np. WSN-40P/1', nap: NAP_URZ, stale: { u_rodzaj: U_RODZAJE[0] },
-    zasilanyEtykieta: 'Zasilany z', uwaga: 'Wyłącznik zasilany z transformatora albo z innego wyłącznika; zasila odbiorniki, kombajn i napędy.' },
+    zasilanyEtykieta: 'Zasilany z pola', uwaga: 'Strona pierwotna (6 kV): tylko dwa przyłącza — zasilanie (z pola, z przelotu innego transformatora albo z aparatu 6 kV) i najwyżej jeden przelot do kolejnego transformatora. Strona wtórna: dowolnie wiele odpływów do wyłączników; transformator dwunapięciowy (6/0,5/1 kV) daje 0,5 kV i 1 kV.' },
+  { id: 'wylacznik', store: 'urzadzenia', label: 'Wyłącznik / szafa stycznikowa / zespół (WSN, BTH, OSW…)', krotko: 'Wyłącznik', nazwa: 'nazwa', przyklad: 'np. WSN-40P/1', nap: NAP_URZ, stale: { u_rodzaj: U_RODZAJE[0] },
+    zasilanyEtykieta: 'Zasilany z', uwaga: 'Wyłącznik, szafa stycznikowa albo zespół transformatorowy — zabezpiecza urządzenia końcowe. Zasilany z transformatora albo przelotem z innego wyłącznika; zwykle ma zasilanie i jeden odpływ. Napięcie (1 kV albo 0,5 kV) wynika ze strony wtórnej transformatora.' },
   { id: 'odbiornik', store: 'urzadzenia', label: 'Odbiornik (silnik, pompa, wentylator…)', krotko: 'Odbiornik', nazwa: 'nazwa', przyklad: 'np. pompa PH-1', nap: NAP_URZ, stale: { u_rodzaj: U_RODZAJE[1] },
-    zasilanyEtykieta: 'Zasilany z wyłącznika', uwaga: 'Odbiornik zasilany z wyłącznika — nie bezpośrednio z transformatora.' },
+    zasilanyEtykieta: 'Zasilany z wyłącznika', uwaga: 'Urządzenie końcowe (silnik, pompa, maszyna) — zasilane z wyłącznika, nie bezpośrednio z transformatora; nie ma przelotów i nic nie zasila. Napięcie jak wyłącznika, z którego jest zasilane.' },
   { id: 'kb', store: 'kb', label: 'Kombajn / KB', krotko: 'Kombajn', nazwa: 'kb_nazwa', przyklad: 'np. AM-1',
     zasilanyEtykieta: 'Zasilany z wyłącznika', uwaga: 'Kombajn zasilany z wyłącznika.' },
   { id: 'przenosniki', store: 'przenosniki', label: 'Przenośnik / napęd', krotko: 'Przenośnik', nazwa: 'pr_nr', przyklad: 'np. 1.6',
@@ -346,21 +348,56 @@ export function createPlanView(containerId) {
     return { wynik, spozaBazy };
   }
 
-  function napiecieKabla(p) {
-    const { store, rec } = p.zrodlo;
-    if (store === 'rozdzielnie') return kv(rec.r_napiecie) ?? 6;
-    if (store === 'poleRozdzielcze') {
-      const r = rozwiaz(rec.miejsce_zabudowy, dane.rozdzielnie, 'nazwa_r');
-      return kv(r?.r_napiecie) ?? 6;
-    }
-    if (store === 'transformatory') {
+  // 05.11.2026 (Piotr): napięcie urządzenia wynika ze źródła — ze strony wtórnej transformatora (1 kV albo 0,5 kV;
+  // dwunapięciowy daje oba), dalej przez wyłączniki. opcjeOd = jakie napięcia źródło może dać odbiorowi.
+  const pierwotne = (t) => kv(String(t?.t_napiecie || '').split('/')[0]) ?? 6;
+  function opcjeOd(zStore, zRec, celStore, celRec, d = 0) {
+    if (!zRec || d > 30) return null;
+    if (zStore === 'rozdzielnie') return [kv(zRec.r_napiecie) ?? 6];
+    if (zStore === 'poleRozdzielcze') return [kv(rozwiaz(zRec.miejsce_zabudowy, dane.rozdzielnie || [], 'nazwa_r')?.r_napiecie) ?? 6];
+    if (zStore === 'transformatory') {
       // przelot 6 kV (do transformatora albo aparatu 6 kV) idzie stroną pierwotną
-      const wszystkie = String(rec.t_napiecie || '').split('/').map((x) => kv(x));
-      if (p.cel.store === 'transformatory' || (kv(p.cel.rec.nap_zas) ?? 0) >= 3) return wszystkie[0] ?? 6;
-      const czesci = wszystkie.slice(1).filter((x) => x !== null);
-      return czesci.length ? Math.max(...czesci) : 1;
+      if (celStore === 'transformatory' || (kv(celRec?.nap_zas) ?? 0) >= 3) return [pierwotne(zRec)];
+      return napieciaWtorne(zRec);
     }
-    return kv(p.cel.rec.nap_zas) ?? kv(rec.nap_zas) ?? 1;
+    if (zStore === 'urzadzenia') {
+      const e = napiecieEfektywne('urzadzenia', zRec, d + 1);
+      return e === null ? null : [e];
+    }
+    return null;
+  }
+  // napięcie, na którym faktycznie pracuje urządzenie (null = nie da się ustalić)
+  function napiecieEfektywne(store, rec, d = 0) {
+    const z = zrodloRek(store, rec);
+    const o = z ? opcjeOd(z.store, z.rec, store, rec, d) : null;
+    const v = kv(rec.nap_zas);
+    if (!o) return store === 'urzadzenia' ? v : null;
+    if (o.length === 1) return o[0];
+    return o.find((x) => rowneKV(x, v)) ?? null;
+  }
+
+  function napiecieKabla(p) {
+    const o = opcjeOd(p.zrodlo.store, p.zrodlo.rec, p.cel.store, p.cel.rec);
+    const v = kv(p.cel.rec.nap_zas);
+    if (o && o.length) return o.find((x) => rowneKV(x, v)) ?? (o.length === 1 ? o[0] : Math.max(...o));
+    return v ?? kv(p.zrodlo.rec.nap_zas) ?? 1;
+  }
+
+  // Rodzaj połączenia (05.11.2026, Piotr): zasilanie (z przelotami) — linia ciągła, grubsza wg napięcia;
+  // odpływ do urządzenia końcowego — przerywana; kabel rezerwowy — kreska-kropka.
+  function rodzajPolaczenia(p) {
+    if (p.prefiks === 'kabel_rez') return 'rezerwowe';
+    const zr = rodzajRek(p.zrodlo.store, p.zrodlo.rec);
+    const cel = rodzajRek(p.cel.store, p.cel.rec);
+    if (KONCOWE.has(cel)) return 'odplyw';
+    if (zr === cel || (zr === 'transformatory' && (kv(p.cel.rec.nap_zas) ?? 0) >= 3)) return 'przelot';
+    return 'zasilanie';
+  }
+  const grubWgNapiecia = (kV) => (kV >= 3 ? 2.8 : kV >= 0.9 ? 2.0 : 1.5);
+  function stylKabla(rodzaj, kV) {
+    if (rodzaj === 'odplyw') return { grub: 1.3, kreski: ' stroke-dasharray="6 3.5"' };
+    if (rodzaj === 'rezerwowe') return { grub: grubWgNapiecia(kV) - 0.4, kreski: ' stroke-dasharray="10 3 2 3"' };
+    return { grub: grubWgNapiecia(kV), kreski: '' };
   }
 
   function opisKabla(rec, prefiks) {
@@ -524,8 +561,9 @@ export function createPlanView(containerId) {
       }
       const napKabla = napiecieKabla(p);
       const kolor = kolorNapiecia(napKabla);
-      const grubKabla = (napKabla >= 3 ? 1.6 : 1.1) + 1 * sk();
-      const kreski = p.prefiks === 'kabel_rez' ? ' stroke-dasharray="7 4"' : '';
+      const styl = stylKabla(rodzajPolaczenia(p), napKabla);
+      const grubKabla = styl.grub + 1 * sk();
+      const kreski = styl.kreski;
       const odsun = -(pasChodnika / 2 + 3 + 3.5 * (pas % 7));
       pas += 1;
       let punkty = [{ x: a.x, y: a.y }];
@@ -650,18 +688,19 @@ export function createPlanView(containerId) {
 
   function renderLegenda() {
     const pozycja = (typ, tekst, nap = [6, 1]) => `<span class="plan-leg"><svg width="30" height="26" viewBox="-2 0 38 34">${symbol(typ, 17, 17, KOLOR.obrys, 0.62, nap)}</svg>${tekst}</span>`;
-    const kabel = (kolor, tekst, kreski = '') => `<span class="plan-leg"><svg width="34" height="10"><line x1="0" y1="5" x2="34" y2="5" stroke="${kolor}" stroke-width="2.4"${kreski}/></svg>${tekst}</span>`;
+    const kabel = (kolor, tekst, kreski = '', grub = 2.4) => `<span class="plan-leg"><svg width="34" height="10"><line x1="0" y1="5" x2="34" y2="5" stroke="${kolor}" stroke-width="${grub}"${kreski}/></svg>${tekst}</span>`;
     legendaEl.innerHTML = `
       ${pozycja('rozdzielnia', 'Rozdzielnia (szyna zbiorcza)', [6, 6])}
       ${pozycja('pole', 'Pole z wyłącznikiem', [6, 6])}
       ${pozycja('transformator', 'Transformator SN/nn')}
-      ${pozycja('urzadzenie', 'Wyłącznik / aparat', [1, 1])}
-      ${pozycja('naped', 'Odbiornik / napęd (silnik M)')}
+      ${pozycja('urzadzenie', 'Wyłącznik / szafa stycznikowa / zespół', [1, 1])}
+      ${pozycja('naped', 'Urządzenie końcowe (silnik M, pompa, napęd)')}
       ${pozycja('kombajn', 'Kombajn / KB')}
-      ${kabel(KOLOR.sn, 'Kabel SN (6 kV)')}
-      ${kabel(KOLOR.nn1, 'Kabel nn 1 kV')}
-      ${kabel(KOLOR.nn05, 'Kabel nn ≤ 0,69 kV')}
-      ${kabel(KOLOR.obrys, 'Kabel rezerwowy', ' stroke-dasharray="7 4"')}
+      ${kabel(KOLOR.sn, 'Zasilanie 6 kV', '', 2.8)}
+      ${kabel(KOLOR.nn1, 'Zasilanie 1 kV', '', 2.0)}
+      ${kabel(KOLOR.nn05, 'Zasilanie 0,5 kV', '', 1.5)}
+      ${kabel(KOLOR.nn1, 'Odpływ do urządzenia końcowego', ' stroke-dasharray="6 3.5"', 1.3)}
+      ${kabel(KOLOR.obrys, 'Kabel rezerwowy', ' stroke-dasharray="10 3 2 3"')}
       <span class="plan-leg"><svg width="34" height="10"><line x1="0" y1="5" x2="34" y2="5" stroke="${KOLOR.przenosnik}" stroke-width="4"/><line x1="0" y1="5" x2="34" y2="5" stroke="#fff" stroke-width="1.8" stroke-dasharray="1.5 6"/></svg>Przenośnik</span>
       <span class="plan-leg"><svg width="34" height="10"><line x1="0" y1="5" x2="26" y2="5" stroke="${KOLOR.drazenie}" stroke-width="2.5"/><path d="M24,1 L33,5 L24,9 z" fill="${KOLOR.drazenie}"/></svg>Kierunek drążenia</span>
       ${warstwy.zrodlo ? `<span class="plan-leg">Obrys: <b style="color:${KOLOR.zrodlo.Excel}">Excel</b> · <b style="color:${KOLOR.zrodlo['ręcznie']}">ręcznie</b> · <b style="color:${KOLOR.zrodlo.pomiar}">pomiar</b> · <b style="color:${KOLOR.zrodlo['']}">nie podano</b></span>` : ''}
@@ -679,7 +718,8 @@ export function createPlanView(containerId) {
     const bezKabla = w.kable.filter((k) => !maOpisKabla(k.cel.rec, k.prefiks));
     const niewidoczne = w.kable.filter((k) => !k.narysowany);
     const chodnikiBraki = [...geo.values()].filter((g) => g.brakDanych);
-    const niezgodne = w.kable.filter((k) => !zgodnePolaczenie(k));
+    const niezgodne = w.kable.map((k) => ({ k, pow: problemyPolaczenia(k, w.kable) })).filter((x) => x.pow.length);
+    const doSprawdzenia = kilkaOdplywow(w.kable);
     const nazwa = (store, rec) => {
       const d = OBIEKTY.find((o) => o.store === store);
       if (store === 'przenosniki') return `przenośnik ${rec.pr_nr}`;
@@ -692,7 +732,8 @@ export function createPlanView(containerId) {
       blok('Bez położenia na planie', bezPolozenia.map(({ def, rec }) => `<li>${esc(nazwa(def.store, rec))} <button type="button" class="btn-small" data-postaw="${def.store}:${rec.id}">Postaw na planie</button> <button type="button" class="btn-small" data-edytuj="${def.store}:${rec.id}">Edytuj</button></li>`)),
       blok('Przenośniki bez chodnika', przenBez.map((rec) => `<li>${esc(nazwa('przenosniki', rec))} <button type="button" class="btn-small" data-edytuj="przenosniki:${rec.id}">Edytuj</button></li>`)),
       blok('Połączenia bez opisu kabla', bezKabla.map((k) => `<li>${esc(nazwa(k.zrodlo.store, k.zrodlo.rec))} → ${esc(nazwa(k.cel.store, k.cel.rec))}${k.prefiks === 'kabel_rez' ? ' (rezerwowe)' : ''} <button type="button" class="btn-small" data-edytuj="${k.cel.store}:${k.cel.rec.id}">Uzupełnij kabel</button></li>`)),
-      blok('Połączenia niezgodne z układem zasilania', niezgodne.map((k) => `<li>${esc(nazwa(k.zrodlo.store, k.zrodlo.rec))} → ${esc(nazwa(k.cel.store, k.cel.rec))}: ${esc(powodNiezgodnosci(k))} <button type="button" class="btn-small" data-zasilanie="${k.cel.store}:${k.cel.rec.id}">Zmień zasilanie</button></li>`)),
+      blok('Połączenia niezgodne z układem zasilania', niezgodne.map(({ k, pow }) => `<li>${esc(nazwa(k.zrodlo.store, k.zrodlo.rec))} → ${esc(nazwa(k.cel.store, k.cel.rec))}: ${esc(pow.join('; '))} <button type="button" class="btn-small" data-zasilanie="${k.cel.store}:${k.cel.rec.id}">Zmień zasilanie</button></li>`)),
+      blok('Do sprawdzenia: wyłącznik z kilkoma odpływami do urządzeń końcowych (zwykle jeden)', doSprawdzenia.map(({ rec, cele }) => `<li>${esc(nazwa('urzadzenia', rec))} → ${esc(cele.join(', '))}</li>`)),
       blok('Kable nienarysowane (jeden z końców bez położenia)', niewidoczne.map((k) => `<li>${esc(nazwa(k.zrodlo.store, k.zrodlo.rec))} → ${esc(nazwa(k.cel.store, k.cel.rec))}</li>`)),
       blok('Zasilanie wpisane tekstem, spoza bazy', w.spozaBazy.map((s) => `<li>${esc(nazwa(s.store, s.rec))}: „${esc(s.opis)}” <button type="button" class="btn-small" data-edytuj="${s.store}:${s.rec.id}">Edytuj</button></li>`)),
       blok('Chodniki bez kierunku lub długości (przyjęto 90° / 100 m)', chodnikiBraki.map((g) => `<li>${esc(g.rec.ch_nazwa)} <button type="button" class="btn-small" data-edytuj="chodniki:${g.rec.id}">Edytuj</button></li>`)),
@@ -857,6 +898,67 @@ export function createPlanView(containerId) {
     return 'niezgodne z układem zasilania';
   }
 
+  const fmtKV = (v) => znacznikNapiecia(v);
+  // przeloty po stronie pierwotnej transformatora (do transformatora albo aparatu 6 kV)
+  const przelotyPierwotne = (trafoId, pol) => pol.filter((p) => p.zrodlo.store === 'transformatory' && p.zrodlo.rec.id === trafoId && rodzajPolaczenia(p) === 'przelot');
+
+  function problemNapiecia(p) {
+    if (p.cel.store !== 'urzadzenia') return null;
+    const o = opcjeOd(p.zrodlo.store, p.zrodlo.rec, p.cel.store, p.cel.rec);
+    if (!o) return null;
+    const v = kv(p.cel.rec.nap_zas);
+    if (v === null) return o.length > 1 ? `źródło dwunapięciowe (${o.map(fmtKV).join(' / ')}) — wybierz napięcie urządzenia` : null;
+    if (!o.some((x) => rowneKV(x, v))) return `urządzenie ${fmtKV(v)}, a źródło daje ${o.map(fmtKV).join(' albo ')}`;
+    return null;
+  }
+
+  // wszystkie powody niezgodności: reguła układu, napięcie, strona pierwotna transformatora (zasilanie + 1 przelot)
+  function problemyPolaczenia(p, pol = polaczenia().wynik) {
+    const pow = [];
+    if (!zgodnePolaczenie(p)) pow.push(powodNiezgodnosci(p));
+    const n = problemNapiecia(p);
+    if (n) pow.push(n);
+    if (p.zrodlo.store === 'transformatory' && rodzajPolaczenia(p) === 'przelot') {
+      const lista = przelotyPierwotne(p.zrodlo.rec.id, pol);
+      const i = lista.findIndex((q) => q.cel.store === p.cel.store && q.cel.rec.id === p.cel.rec.id);
+      if (lista.length > 1 && i > 0) pow.push('transformator ma po stronie pierwotnej tylko dwa przyłącza: zasilanie i jeden przelot');
+    }
+    return pow;
+  }
+
+  function kilkaOdplywow(pol) {
+    const m = new Map();
+    for (const p of pol) {
+      if (p.zrodlo.store !== 'urzadzenia' || rodzajPolaczenia(p) !== 'odplyw') continue;
+      const w = m.get(p.zrodlo.rec.id) || { rec: p.zrodlo.rec, cele: [] };
+      w.cele.push(nazwaRek(p.cel.store, p.cel.rec));
+      m.set(p.zrodlo.rec.id, w);
+    }
+    return [...m.values()].filter((w) => w.cele.length > 1);
+  }
+
+  // napięcia do wyboru w formularzu urządzenia przy danym źródle ('pole|magazyn|id'); null = pełna lista
+  function opcjeNapieciaFormularza(rodzajId, wartoscZrodla, celRec = null) {
+    if (!['wylacznik', 'odbiornik'].includes(rodzajId) || !wartoscZrodla) return null;
+    const [, zStore, id] = String(wartoscZrodla).split('|');
+    const zRec = (dane[zStore] || []).find((r) => r.id === Number(id));
+    const o = opcjeOd(zStore, zRec, 'urzadzenia', { ...(celRec || {}), nap_zas: '' });
+    return o && o.length ? o.map(fmtKV) : null;
+  }
+
+  function odswiezNapiecie(rodzajId, celRec = null, domyslneZrodlo = '') {
+    const sel = dodajEl.querySelector('[name="napiecie"]');
+    if (!sel) return;
+    let zr = dodajEl.querySelector('[name="zrodlo"]')?.value || '';
+    if (zr === '__bez_zmian') zr = domyslneZrodlo;
+    const wgZrodla = opcjeNapieciaFormularza(rodzajId, zr, celRec);
+    const opcje = wgZrodla || NAP_URZ.opcje;
+    const teraz = sel.value || (celRec ? fmtKV(kv(celRec.nap_zas)) : '');
+    sel.innerHTML = opcje.map((o) => `<option ${o === teraz ? 'selected' : ''}>${o}</option>`).join('');
+    const uw = dodajEl.querySelector('[data-uwaga-napiecia]');
+    if (uw) uw.textContent = wgZrodla && wgZrodla.length > 1 ? 'Transformator dwunapięciowy — wybierz stronę wtórną.' : wgZrodla ? 'Napięcie wynika ze źródła.' : '';
+  }
+
   // źródło zasilania głównego rekordu (pierwsze rozpoznane pole "zasilany z")
   function zrodloRek(store, rec) {
     for (const [pole, zStore, zPole, prefiks] of ZASILANIE[store] || []) {
@@ -899,9 +1001,13 @@ export function createPlanView(containerId) {
     const zakazane = wyklucz ? potomkowie(wyklucz.store, wyklucz.id) : new Set();
     if (wyklucz) zakazane.add(`${wyklucz.store}:${wyklucz.id}`);
     const wynik = [];
+    const pol = polaczenia().wynik;
     for (const [pole, zStore, zRodzaj] of ZRODLA_RODZAJU[rodzajId] || []) {
       for (const r of dane[zStore] || []) {
         if (rodzajRek(zStore, r) !== zRodzaj || zakazane.has(`${zStore}:${r.id}`)) continue;
+        // strona pierwotna transformatora: zasilanie + jeden przelot (05.11.2026)
+        if (pole === 'zasilany_z_transformatora' && zStore === 'transformatory'
+          && przelotyPierwotne(r.id, pol).some((q) => !(wyklucz && q.cel.store === wyklucz.store && q.cel.rec.id === wyklucz.id))) continue;
         let opis = `${etykietaRodzaju(zRodzaj)} ${nazwaRek(zStore, r)}`;
         if (zStore === 'poleRozdzielcze') {
           const gdzie = rozwiaz(r.miejsce_zabudowy, dane.rozdzielnie || [], 'nazwa_r');
@@ -957,6 +1063,7 @@ export function createPlanView(containerId) {
         </label>
         ${rodzaj.nap ? `<label>Napięcie
           <select name="napiecie">${rodzaj.nap.opcje.map((o) => `<option>${o}</option>`).join('')}</select>
+          <span class="field-hint" data-uwaga-napiecia></span>
         </label>` : ''}
         ${jestPole ? `<label>W rozdzielni
           <select name="rozdzielnia" required>${opcjeSelect(rozdzielnie, '— wybierz —', wstepne.rozdzielnia ? String(wstepne.rozdzielnia) : '')}</select>
@@ -974,6 +1081,7 @@ export function createPlanView(containerId) {
         <button type="button" class="btn-small" data-akcja="anuluj-dodawanie">Anuluj</button>
       </div>`;
     dodajEl.classList.remove('hidden');
+    odswiezNapiecie(rodzaj.id);
     dodajEl.querySelector('[name="nazwa"]').focus();
     dodajEl.scrollIntoView({ block: 'nearest' });
   }
@@ -1035,6 +1143,10 @@ export function createPlanView(containerId) {
         <label>${esc(def?.zasilanyEtykieta || 'Zasilany z')}
           <select name="zrodlo">${bezZmian}${opcjeSelect(zrodla, '— brak zasilania —', wybrana)}</select>
         </label>
+        ${store === 'urzadzenia' ? `<label>Napięcie
+          <select name="napiecie"></select>
+          <span class="field-hint" data-uwaga-napiecia></span>
+        </label>` : ''}
       </div>
       <p class="plan-dodaj-uwaga">${esc(def?.uwaga || '')} Lista pokazuje tylko źródła zgodne z układem, bez elementów zasilanych z tego (bez pętli).</p>
       <div class="form-actions">
@@ -1042,6 +1154,9 @@ export function createPlanView(containerId) {
         <button type="button" class="btn-small" data-akcja="anuluj-dodawanie">Anuluj</button>
       </div>`;
     dodajEl.classList.remove('hidden');
+    dodajEl.dataset.rodzajUrz = rodzajId;
+    dodajEl.dataset.obecneZrodlo = obecne ? `${obecne.pole}|${obecne.store}|${obecne.rec.id}` : '';
+    odswiezNapiecie(rodzajId, rec, dodajEl.dataset.obecneZrodlo);
     dodajEl.scrollIntoView({ block: 'nearest' });
   }
 
@@ -1052,6 +1167,7 @@ export function createPlanView(containerId) {
     if (!rec) return;
     let nowy = { ...rec };
     if (f.get('u_rodzaj')) nowy.u_rodzaj = f.get('u_rodzaj');
+    if (store === 'urzadzenia' && f.get('napiecie')) nowy.nap_zas = f.get('napiecie');
     const zr = String(f.get('zrodlo') || '');
     if (zr !== '__bez_zmian') {
       const [pole, , idZr] = zr.split('|');
@@ -1099,6 +1215,12 @@ export function createPlanView(containerId) {
     } else if (dodajEl.dataset.tryb === 'zasilanie' && e.target.name === 'u_rodzaj') {
       const [store, id] = String(dodajEl.dataset.cel).split(':');
       pokazZasilanie(store, Number(id), e.target.value === U_RODZAJE[1] ? 'odbiornik' : 'wylacznik');
+    } else if (e.target.name === 'zrodlo') {
+      if (dodajEl.dataset.tryb === 'dodaj') odswiezNapiecie(dodajEl.querySelector('[name="rodzaj"]').value);
+      else {
+        const [store, id] = String(dodajEl.dataset.cel).split(':');
+        odswiezNapiecie(dodajEl.dataset.rodzajUrz, (dane[store] || []).find((r) => r.id === Number(id)), dodajEl.dataset.obecneZrodlo);
+      }
     }
   });
   dodajEl.addEventListener('submit', (e) => {
@@ -1449,5 +1571,5 @@ export function createPlanView(containerId) {
     return true;
   }
 
-  return { init, pokaz, _test: { zrodlaDla, odplywyDla, zgodnePolaczenie, wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
+  return { init, pokaz, _test: { zrodlaDla, odplywyDla, zgodnePolaczenie, problemyPolaczenia, rodzajPolaczenia, opcjeNapieciaFormularza, napiecieEfektywne, kilkaOdplywow, polaczenia: () => polaczenia().wynik, wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
 }
