@@ -319,7 +319,35 @@ try {
   ok(!Object.values(poz12b).some((p) => p.rec?.nazwa_r === 'R-OBCA'), 'rozdzielnia bez odbiorów w rejonie nie jest rysowana');
   ok([...svg.querySelectorAll('text')].some((x) => x.textContent === 'R-ZDALNA (poza rejonem)'), 'opis: R-ZDALNA (poza rejonem)');
   ok(!svg.innerHTML.includes('NaN'), 'brak NaN po rozdzielni poza rejonem');
-  window.__niezgodne = [...document.querySelectorAll('#plan-braki details')].find((d) => d.textContent.includes('niezgodne'))?.textContent || '';
+  // 13) Rejon = KB z sieci zasilania (05.11.2026)
+  const U_RODZAJE = U_RODZ;
+  const RR = await db.nadzorAdd('rozdzielnie', { nazwa_r: 'R-REJ', r_napiecie: '6 kV' });
+  const PR = await db.nadzorAdd('poleRozdzielcze', { p_nazwa: 'R-REJ pole 1', miejsce_zabudowy: RR });
+  const TA = await db.nadzorAdd('transformatory', { t_nr: 'REJ-TA', t_napiecie: '6/1 kV', zasilany_z_pola: PR, lok_chodnik: chod.id, lok_metraz: 10, lok_strona: 'lewa' });
+  const TB = await db.nadzorAdd('transformatory', { t_nr: 'REJ-TB', t_napiecie: '6/1 kV', zasilany_z_transformatora: TA });
+  const WA = await db.nadzorAdd('urzadzenia', { nazwa: 'REJ-WA', u_rodzaj: U_RODZAJE[0], nap_zas: '1 kV', zasilane_z_transformatora: TA });
+  const WP = await db.nadzorAdd('urzadzenia', { nazwa: 'REJ-WP', u_rodzaj: U_RODZAJE[0], nap_zas: '1 kV', zasilane_z_transformatora: TA });
+  const PA = await db.nadzorAdd('urzadzenia', { nazwa: 'REJ-pompa', u_rodzaj: U_RODZAJE[1], nap_zas: '1 kV', zasilane_z_urzadzenia: WP });
+  const WB = await db.nadzorAdd('urzadzenia', { nazwa: 'REJ-WB', u_rodzaj: U_RODZAJE[0], nap_zas: '1 kV', zasilane_z_transformatora: TB });
+  await db.nadzorAdd('kb', { kb_nazwa: 'AM-9', zasilany_z_urzadzenia: WA });
+  await db.nadzorAdd('kb', { kb_nazwa: 'AM-8', zasilany_z_urzadzenia: WB });
+  const TO = await db.nadzorAdd('transformatory', { t_nr: 'REJ-TO', t_napiecie: '6/1 kV', zasilany_z_pola: PR, rejon: 'odstawczy C' });
+  const WO = await db.nadzorAdd('urzadzenia', { nazwa: 'REJ-WO', u_rodzaj: U_RODZAJE[0], nap_zas: '1 kV', zasilane_z_transformatora: TO });
+  await plan.init({});
+  const R = T.rejony();
+  const wl = (s, id) => R.wlasny.get(`${s}:${id}`);
+  const wr = (s, id) => [...(R.wRejonie.get(`${s}:${id}`) || [])].sort().join(',');
+  ok(wl('transformatory', TA) === 'AM-9' && wl('urzadzenia', PA) === 'AM-9', `rejon z sieci: trafo zasilające kombajn i pompa z tego trafo → AM-9 (${wl('transformatory', TA)}, ${wl('urzadzenia', PA)})`);
+  ok(wl('transformatory', TB) === 'AM-8' && wl('urzadzenia', WB) === 'AM-8', 'przelot 6 kV zaczyna gałąź innego rejonu: REJ-TB → AM-8');
+  ok(wr('transformatory', TA) === 'AM-8,AM-9' && wr('poleRozdzielcze', PR).includes('AM-8') && wr('rozdzielnie', RR).includes('AM-9'), `trafo, pole i rozdzielnia na drodze zasilania obu rejonów (${wr('transformatory', TA)})`);
+  ok(wl('urzadzenia', WO) === 'odstawczy C' && R.lista.includes('odstawczy C') && R.lista.includes('AM-9'), 'rejon bez kombajnu wpisany przy trafo — wyłącznik go przejmuje; lista rejonów');
+  ok([...(R.chodnikow.get(chod.id) || [])].includes('AM-9'), 'chodnik z trafo rejonu należy do rejonu AM-9');
+  const urzR = (id) => T.dane().urzadzenia.find((r) => r.id === id);
+  T.ustawRejon('AM-8', true);
+  ok(T.obcyRejon('urzadzenia', urzR(PA)) && !T.obcyRejon('transformatory', T.dane().transformatory.find((r) => r.id === TA)) && !T.obcyRejon('urzadzenia', urzR(WB)), 'widok AM-8: pompa AM-9 wyblakła, trafo zasilające przelot widoczne');
+  T.ustawRejon('wszystkie', true);
+  ok(document.querySelector('[data-akcja-rejon]')?.textContent.includes('AM-9'), 'wybór rejonu na pasku planu');
+  window.__niezgodne =[...document.querySelectorAll('#plan-braki details')].find((d) => d.textContent.includes('niezgodne'))?.textContent || '';
   window.__gotowe = true;
 } catch (e) {
   log.push('WYJĄTEK ' + (e && e.stack || e));

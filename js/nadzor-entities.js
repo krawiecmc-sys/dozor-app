@@ -119,6 +119,7 @@ export const NADZOR_ENTITIES = {
     titleField: 'p_nazwa',
     fields: [
       { key: 'p_nazwa', label: 'Nazwa / nr pola rozdzielczego', type: 'text', required: true },
+      { key: 'rejon', label: 'Rejon (KB)', type: 'fk-or-free', refStore: 'kb', refField: 'kb_nazwa', hint: 'Zwykle puste — rejon wynika z sieci: kombajn wyznacza rejon, a do rejonu należy wszystko, co go zasila, aż do rozdzielni. Wpisz tylko dla rejonu bez kombajnu.' },
       { key: 'p_przeznaczenie', label: 'Przeznaczenie pola', type: 'text', hint: 'np. odpływ, zasilające (główne / rezerwowe), pomiarowe, sprzęgło, bateria kondensatorów, wolne.' },
       { key: 'p_zasilane_z', label: 'Zasilane z (opis źródła)', type: 'text' },
       { key: 'zabezpieczenia_nazwa', label: 'Zabezpieczenia — nazwa', type: 'text' },
@@ -156,6 +157,7 @@ export const NADZOR_ENTITIES = {
     titleField: 't_nr',
     fields: [
       { key: 't_nr', label: 'Nr transformatora', type: 'text', required: true },
+      { key: 'rejon', label: 'Rejon (KB)', type: 'fk-or-free', refStore: 'kb', refField: 'kb_nazwa', hint: 'Zwykle puste — rejon wynika z sieci (transformator zasilający kombajn albo jego wyłączniki należy do rejonu kombajnu). Wpisz dla rejonu bez kombajnu (np. odstawczy) — urządzenia zasilane z tego transformatora przejmą rejon.' },
       { key: 't_nr_kop', label: 'Nr kopalniany', type: 'text', hint: 'Łączy wykaz stacji, schemat rozdzielni i zabezpieczenia (np. „nr 901” pod polem).' },
       { key: 'oddzial', label: 'Oddział elektryczny (użytkownik)', type: 'select', options: ['', 'odstawczy', 'przodkowy', 'ścianowy', 'inny'], hint: 'Na tej samej sieci są transformatory i urządzenia innych oddziałów — na Planie rejonu widać je wyblakłe albo ukryte. Puste: jak transformator, z którego zasilane.' },
       { key: 't_typ', label: 'Typ', type: 'text' },
@@ -224,6 +226,7 @@ export const NADZOR_ENTITIES = {
     titleField: 'nazwa',
     fields: [
       { key: 'nazwa', label: 'Nazwa / oznaczenie urządzenia', type: 'text', required: true },
+      { key: 'rejon', label: 'Rejon (KB)', type: 'fk-or-free', refStore: 'kb', refField: 'kb_nazwa', hint: 'Zwykle puste — rejon jak źródło zasilania.' },
       { key: 'symbol', label: 'Symbol', type: 'text' },
       { key: 'u_rodzaj', label: 'Rodzaj', type: 'select', options: U_RODZAJE, hint: 'Transformator zasila wyłączniki / aparaty. Odbiornik (silnik, pompa, wentylator) zasilany jest z wyłącznika.' },
       { key: 'oddzial', label: 'Oddział elektryczny (użytkownik)', type: 'select', options: ['', 'odstawczy', 'przodkowy', 'ścianowy', 'inny'], hint: 'Na tej samej sieci są transformatory i urządzenia innych oddziałów — na Planie rejonu widać je wyblakłe albo ukryte. Puste: jak transformator, z którego zasilane.' },
@@ -320,6 +323,7 @@ export const NADZOR_ENTITIES = {
     titleField: 'ch_nazwa',
     fields: [
       { key: 'ch_nazwa', label: 'Nazwa chodnika', type: 'text', required: true },
+      { key: 'rejon', label: 'Rejon (KB)', type: 'fk-or-free', refStore: 'kb', refField: 'kb_nazwa', hint: 'Zwykle puste — chodnik należy do rejonu, gdy stoją w nim urządzenia rejonu. Wpisz dla chodnika pustego albo w przygotowaniu.' },
       { key: 'ch_nr', label: 'Nr chodnika', type: 'text' },
       { key: 'ch_rodzaj', label: 'Rodzaj chodnika', type: 'select', options: ['', 'transportowy', 'odstawczy', 'dowierzchnia', 'przecinka', 'inny'], hint: 'Widać go przy napędach i na Planie rejonu (05.11.2026).' },
       {
@@ -351,6 +355,7 @@ export const NADZOR_ENTITIES = {
     titleField: 'pr_nr',
     fields: [
       { key: 'pr_nr', label: 'Nr przenośnika / napędu (np. 1.3)', type: 'text', required: true },
+      { key: 'rejon', label: 'Rejon (KB)', type: 'fk-or-free', refStore: 'kb', refField: 'kb_nazwa', hint: 'Zwykle puste — rejon jak wyłącznik, z którego zasilany napęd.' },
       { key: 'pr_typ', label: 'Typ (np. Pt1000, Mifama 1100)', type: 'text' },
       { key: 'pr_chodnik', label: 'Chodnik', type: 'fk-or-free', refStore: 'chodniki', refField: 'ch_nazwa', hint: 'Nr i rodzaj chodnika (transportowy, odstawczy, dowierzchnia, przecinka) wpisuje się w zakładce Chodniki — pokażą się przy napędzie.' },
       { key: 'pr_od_m', label: 'Od metrażu (m)', type: 'number', blank: true },

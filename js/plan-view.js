@@ -21,6 +21,7 @@ import { nadzorGetAll, nadzorUpdate, nadzorAdd, nadzorDelete } from './db.js';
 import { NADZOR_ENTITIES, U_RODZAJE } from './nadzor-entities.js';
 import { KOLOR, kolorNapiecia, kv, symbolSvg, napiecieRekordu, napieciaWtorne, rowneKV } from './symbole.js';
 import { wczytajKatalog, zapiszKatalog, typAparatu, NAPIECIA_KATALOGU } from './katalog-aparatow.js';
+import { ZASILANIE, jestOdbiornik, KONCOWE, rozwiaz, rodzajRek, polaczenia as polaczeniaSieci, zrodloRek as zrodloSieci, rodzajPolaczenia as rodzajPolaczeniaSieci, rejonySieci, MAGAZYNY_REJONU } from './siec-zasilania.js';
 
 const OBIEKTY = [
   { store: 'rozdzielnie', label: 'Rozdzielnia', title: 'nazwa_r', symbol: 'rozdzielnia' },
@@ -29,36 +30,11 @@ const OBIEKTY = [
   { store: 'kb', label: 'Kombajn / KB', title: 'kb_nazwa', symbol: 'kombajn' },
 ];
 
-// Skąd brać źródło zasilania dla danego magazynu: [pole FK, magazyn źródła, pole nazwy źródła, prefiks pól kabla]
-const ZASILANIE = {
-  rozdzielnie: [
-    ['r_zasilana_z_glowne', 'rozdzielnie', 'nazwa_r', 'kabel'],
-    ['r_zasilana_z_rezerwowe', 'rozdzielnie', 'nazwa_r', 'kabel_rez'],
-  ],
-  poleRozdzielcze: [['zasilane_z_pola', 'poleRozdzielcze', 'p_nazwa', 'kabel']], // przelot 6 kV
-  transformatory: [
-    ['zasilany_z_pola', 'poleRozdzielcze', 'p_nazwa', 'kabel'],
-    ['zasilany_z_transformatora', 'transformatory', 't_nr', 'kabel'], // przelot 6 kV
-    ['zasilany_z_urzadzenia', 'urzadzenia', 'nazwa', 'kabel'], // aparat 6 kV
-  ],
-  urzadzenia: [
-    ['zasilane_z_transformatora', 'transformatory', 't_nr', 'kabel'],
-    ['zasilane_z_urzadzenia', 'urzadzenia', 'nazwa', 'kabel'],
-    ['zasilane_z_pola', 'poleRozdzielcze', 'p_nazwa', 'kabel'], // aparat / pompa 6 kV
-  ],
-  kb: [
-    ['zasilany_z_transformatora', 'transformatory', 't_nr', 'kabel'],
-    ['zasilany_z_urzadzenia', 'urzadzenia', 'nazwa', 'kabel'],
-  ],
-  przenosniki: [['zasilany_z_urzadzenia', 'urzadzenia', 'nazwa', 'kabel']],
-};
+// ZASILANIE, rozwiaz, jestOdbiornik, KONCOWE, rodzajRek: siec-zasilania.js (wspólne z Grafem zasilania)
 
 // Układ zasilania (03.11.2026, Piotr): pole zasila transformator albo inne pole (przelot 6 kV);
 // transformator zasila wyłączniki / aparaty, nie bezpośrednio silniki; wyłącznik zasila kolejny
 // wyłącznik, odbiornik, kombajn albo napęd przenośnika; odbiornik nie zasila niczego.
-const jestOdbiornik = (rec) => String(rec?.u_rodzaj || '').startsWith('odbiornik');
-// urządzenia końcowe układu: nie mają przelotów i nic nie zasilają (05.11.2026)
-const KONCOWE = new Set(['odbiornik', 'kb', 'przenosniki']);
 // rodzaj -> kto może go zasilać: [pole FK, magazyn źródła, rodzaj źródła]
 const ZRODLA_RODZAJU = {
   rozdzielnie: [['przelot', 'poleRozdzielcze', 'poleRozdzielcze']], // tworzy pole zasilające nowej rozdzielni
@@ -107,13 +83,6 @@ function esc(str) {
 
 const num = (v) => (v === '' || v === null || v === undefined || Number.isNaN(Number(v)) ? null : Number(v));
 
-// fk-or-free: numeryczne id albo tekst dopasowany po nazwie (jak w graph-view.js)
-function rozwiaz(wartosc, rekordy, pole) {
-  if (wartosc === undefined || wartosc === null || wartosc === '') return null;
-  if (typeof wartosc === 'number') return rekordy.find((r) => r.id === wartosc) || null;
-  const w = String(wartosc).trim().toLowerCase();
-  return rekordy.find((r) => String(r[pole] || '').trim().toLowerCase() === w) || null;
-}
 
 export function createPlanView(containerId) {
   const container = document.getElementById(containerId);
@@ -133,6 +102,9 @@ export function createPlanView(containerId) {
   const ODDZIALY = ['odstawczy', 'przodkowy', 'ścianowy', 'inny'];
   let mojOddzial = 'wszystkie';
   try { mojOddzial = localStorage.getItem('protektor-plan-oddzial') || 'wszystkie'; } catch {}
+  // 05.11.2026: rejon = KB — rozdzielnia i wszystko na sieci aż do odbiorników końcowych (wyliczany z połączeń)
+  let mojRejon = 'wszystkie';
+  try { mojRejon = localStorage.getItem('protektor-plan-rejon') || 'wszystkie'; } catch {}
   let warstwy = { ...WARSTWY_DOMYSLNE };
   try { Object.assign(warstwy, JSON.parse(localStorage.getItem('protektor-plan-warstwy') || '{}')); } catch {}
   const zaznacz = (k) => (warstwy[k] ? 'checked' : '');
@@ -171,8 +143,11 @@ export function createPlanView(containerId) {
         <label><input type="checkbox" data-warstwa="napiecieKabli" ${zaznacz('napiecieKabli')}> Znaczniki napięcia kabli (6 kV / 1 kV / 0,5 kV)</label>
         <label><input type="checkbox" data-warstwa="opisyKabli" ${zaznacz('opisyKabli')}> Opisy kabli (nr, typ, przekrój, długość)</label>
         <label><input type="checkbox" data-warstwa="zrodlo" ${zaznacz('zrodlo')}> Źródło danych (kolor obrysu)</label>
-        <label><input type="checkbox" data-warstwa="inneOddzialy" ${zaznacz('inneOddzialy')}> Elementy innych oddziałów (wyblakłe)</label>
+        <label><input type="checkbox" data-warstwa="inneOddzialy" ${zaznacz('inneOddzialy')}> Elementy innych oddziałów i rejonów (wyblakłe)</label>
       </details>
+      <label class="plan-oddzial">Rejon (KB)
+        <select data-akcja-rejon><option>wszystkie</option></select>
+      </label>
       <label class="plan-oddzial">Oddział
         <select data-akcja-oddzial>${['wszystkie', ...ODDZIALY].map((o) => `<option ${o === mojOddzial ? 'selected' : ''}>${o}</option>`).join('')}</select>
       </label>
@@ -375,26 +350,7 @@ export function createPlanView(containerId) {
 
   // ---------- połączenia zasilające (kable) ----------
 
-  function polaczenia() {
-    const wynik = [];
-    const spozaBazy = [];
-    for (const [store, reguly] of Object.entries(ZASILANIE)) {
-      for (const rec of dane[store] || []) {
-        for (const [pole, zrodloStore, zrodloPole, prefiks] of reguly) {
-          const w = rec[pole];
-          if (w === undefined || w === null || w === '') continue;
-          const zrodlo = rozwiaz(w, dane[zrodloStore] || [], zrodloPole);
-          if (!zrodlo) {
-            spozaBazy.push({ store, rec, opis: String(w) });
-            continue;
-          }
-          if (zrodloStore === store && zrodlo.id === rec.id) continue;
-          wynik.push({ cel: { store, rec }, zrodlo: { store: zrodloStore, rec: zrodlo }, prefiks });
-        }
-      }
-    }
-    return { wynik, spozaBazy };
-  }
+  const polaczenia = () => polaczeniaSieci(dane);
 
   // 05.11.2026 (Piotr): napięcie urządzenia wynika ze źródła — ze strony wtórnej transformatora (1 kV albo 0,5 kV;
   // dwunapięciowy daje oba), dalej przez wyłączniki. opcjeOd = jakie napięcia źródło może dać odbiorowi.
@@ -433,14 +389,7 @@ export function createPlanView(containerId) {
 
   // Rodzaj połączenia (05.11.2026, Piotr): zasilanie (z przelotami) — linia ciągła, grubsza wg napięcia;
   // odpływ do urządzenia końcowego — przerywana; kabel rezerwowy — kreska-kropka.
-  function rodzajPolaczenia(p) {
-    if (p.prefiks === 'kabel_rez') return 'rezerwowe';
-    const zr = rodzajRek(p.zrodlo.store, p.zrodlo.rec);
-    const cel = rodzajRek(p.cel.store, p.cel.rec);
-    if (KONCOWE.has(cel)) return 'odplyw';
-    if (zr === cel || (zr === 'transformatory' && (kv(p.cel.rec.nap_zas) ?? 0) >= 3)) return 'przelot';
-    return 'zasilanie';
-  }
+  const rodzajPolaczenia = rodzajPolaczeniaSieci;
   const grubWgNapiecia = (kV) => (kV >= 3 ? 2.8 : kV >= 0.9 ? 2.0 : 1.5);
   function stylKabla(rodzaj, kV) {
     if (rodzaj === 'odplyw') return { grub: 1.3, kreski: ' stroke-dasharray="6 3.5"' };
@@ -523,14 +472,17 @@ export function createPlanView(containerId) {
     const pasChodnika = Math.max(6, Math.round(13 * sk()));
     // chodniki
     for (const [id, g] of geo) {
+      if (ukryty('chodniki', g.rec)) continue;
       const a = naEkran({ x: g.x0, y: g.y0 }, v);
       const b = naEkran({ x: g.x0 + g.dx * g.len, y: g.y0 + g.dy * g.len }, v);
+      if (obcyRejon('chodniki', g.rec)) czesci.chodniki.push('<g opacity="0.35">');
       czesci.chodniki.push(`<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${KOLOR.chodnikBrzeg}" stroke-width="${pasChodnika + 3}" stroke-linecap="round"/><line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${KOLOR.chodnik}" stroke-width="${pasChodnika}" stroke-linecap="round" data-chodnik="${id}"/>`);
       if (g.rec.ch_w_drazeniu === 'tak') {
         const k = 26 * sk();
         const c = { x: b.x + g.dx * 6, y: b.y + g.dy * 6 };
         czesci.chodniki.push(`<line x1="${c.x - g.dx * k}" y1="${c.y - g.dy * k}" x2="${c.x + g.dx * 14 * sk()}" y2="${c.y + g.dy * 14 * sk()}" stroke="${KOLOR.drazenie}" stroke-width="${Math.max(1.5, 3 * sk())}" marker-end="url(#plan-strzalka)"/>`);
       }
+      if (obcyRejon('chodniki', g.rec)) czesci.chodniki.push('</g>');
     }
 
     // obiekty z położeniem (kolejność: rozdzielnie, transformatory, urządzenia, KB)
@@ -558,7 +510,7 @@ export function createPlanView(containerId) {
         }
         x += num(rec.plan_dx) || 0;
         y += num(rec.plan_dy) || 0;
-        poz[`${def.store}:${rec.id}`] = { x, y, lok, def: def.store === 'urzadzenia' && jestOdbiornik(rec) ? { ...def, symbol: 'naped' } : def, rec, obcy: obcyOddzial(def.store, rec) };
+        poz[`${def.store}:${rec.id}`] = { x, y, lok, def: def.store === 'urzadzenia' && jestOdbiornik(rec) ? { ...def, symbol: 'naped' } : def, rec, obcy: obcyEl(def.store, rec) };
       }
     }
     // 05.11.2026: rozdzielnia poza rejonem (może być daleko od początku schematu) — rysowana przed początkiem
@@ -568,17 +520,17 @@ export function createPlanView(containerId) {
       const pk = punktZdalny(i);
       if (!pk) return;
       const p = naEkran(pk.p, v);
-      poz[`rozdzielnie:${r.id}`] = { x: p.x + (num(r.plan_dx) || 0), y: p.y + (num(r.plan_dy) || 0), lok: pk.lok, rec: r, zdalna: true, def: OBIEKTY[0] };
+      poz[`rozdzielnie:${r.id}`] = { x: p.x + (num(r.plan_dx) || 0), y: p.y + (num(r.plan_dy) || 0), lok: pk.lok, rec: r, zdalna: true, obcy: obcyRejon('rozdzielnie', r), def: OBIEKTY[0] };
     });
     // pola rozdzielcze — rząd kwadracików przy swojej rozdzielni
     const polaRozdz = {};
     for (const pole of dane.poleRozdzielcze || []) {
       const r = rozwiaz(pole.miejsce_zabudowy, dane.rozdzielnie, 'nazwa_r');
       const pr = r && poz[`rozdzielnie:${r.id}`];
-      if (!pr) continue;
+      if (!pr || ukryty('poleRozdzielcze', pole)) continue;
       const i = polaRozdz[r.id] || 0;
       polaRozdz[r.id] = i + 1;
-      poz[`poleRozdzielcze:${pole.id}`] = { x: pr.x - 18 * sk() + i * 16 * sk(), y: pr.y + 28 * sk(), lok: pr.lok, rec: pole, def: { store: 'poleRozdzielcze', symbol: 'pole', label: 'Pole rozdzielcze', title: 'p_nazwa' } };
+      poz[`poleRozdzielcze:${pole.id}`] = { x: pr.x - 18 * sk() + i * 16 * sk(), y: pr.y + 28 * sk(), lok: pr.lok, rec: pole, obcy: obcyRejon('poleRozdzielcze', pole), def: { store: 'poleRozdzielcze', symbol: 'pole', label: 'Pole rozdzielcze', title: 'p_nazwa' } };
     }
     // napędy przenośników
     for (const pr of dane.przenosniki || []) {
@@ -586,7 +538,7 @@ export function createPlanView(containerId) {
       const lok = lokalizacja('przenosniki', pr);
       if (!lok || !geo.has(lok.ch)) continue;
       const p = naEkran(punktM(lok.ch, lok.m), v);
-      poz[`przenosniki:${pr.id}`] = { x: p.x + (num(pr.plan_dx) || 0), y: p.y + (num(pr.plan_dy) || 0), lok, rec: pr, obcy: obcyOddzial('przenosniki', pr), def: { store: 'przenosniki', symbol: 'naped', label: 'Przenośnik / napęd', title: 'pr_nr' } };
+      poz[`przenosniki:${pr.id}`] = { x: p.x + (num(pr.plan_dx) || 0), y: p.y + (num(pr.plan_dy) || 0), lok, rec: pr, obcy: obcyEl('przenosniki', pr), def: { store: 'przenosniki', symbol: 'naped', label: 'Przenośnik / napęd', title: 'pr_nr' } };
     }
 
     // zarezerwuj miejsca symboli, zanim rozmieścimy opisy
@@ -666,7 +618,7 @@ export function createPlanView(containerId) {
       const [rx, ry] = rozmiarSymbolu(def.symbol);
       let tytul = def.store === 'przenosniki' ? [rec.pr_typ, rec.pr_nr].filter(Boolean).join(' ') : rec[def.title];
       if (p.zdalna) tytul = `${tytul || ''} (poza rejonem)`;
-      if (p.obcy) tytul = `${tytul || ''} · odd. ${oddzialRek(def.store, rec)}`;
+      if (p.obcy) tytul = `${tytul || ''}${dopiskObcego(def.store, rec)}`;
       const pol = opis(p.x, p.y, tytul || '(bez nazwy)', { rx, ry, wazny: def.store === 'rozdzielnie' || def.store === 'kb' });
       if (warstwy.daneObiektow) podpis(pol, daneObiektu(def.store, rec));
     }
@@ -676,6 +628,7 @@ export function createPlanView(containerId) {
     // nazwy chodników
     if (warstwy.chodniki) {
       for (const g of geo.values()) {
+        if (ukryty('chodniki', g.rec)) continue;
         const srodek = naEkran({ x: g.x0 + (g.dx * g.len) / 2, y: g.y0 + (g.dy * g.len) / 2 }, v);
         opis(srodek.x, srodek.y, opisChodnika(g.rec) + (g.brakDanych ? ' ⚠' : ''), { rx: 10 * sk(), ry: 12 * sk(), rozmiar: Math.round(8.5 + 2.5 * sk()), kolor: KOLOR.tekstChodnika });
       }
@@ -695,7 +648,16 @@ export function createPlanView(containerId) {
     return { svg, szer, wys, poz, kable, spozaBazy };
   }
 
+  function odswiezWyborRejonu() {
+    const sel = container.querySelector('[data-akcja-rejon]');
+    if (!sel) return;
+    const lista = rejony().lista;
+    if (mojRejon !== 'wszystkie' && !lista.includes(mojRejon)) mojRejon = 'wszystkie';
+    sel.innerHTML = ['wszystkie', ...lista].map((o) => `<option ${o === mojRejon ? 'selected' : ''}>${esc(o)}</option>`).join('');
+  }
+
   function render() {
+    odswiezWyborRejonu();
     if (!(dane.chodniki || []).length) {
       svgEl.innerHTML = '';
       svgEl.setAttribute('width', 0);
@@ -858,6 +820,9 @@ export function createPlanView(containerId) {
     const wChodniku = chNap && !przyObiekcie(rec) ? `<p class="plan-karta-kabel">Chodnik: ${esc(opisChodnika(chNap))}${chNap.ch_nr || chNap.ch_rodzaj ? '' : ' — nr i rodzaj chodnika można dopisać w zakładce Chodniki'} <button type="button" class="btn-small" data-edytuj="chodniki:${chNap.id}">Edytuj chodnik</button></p>` : '';
     const odd = oddzialRek(store, rec);
     const oddz = odd && !rec.oddzial ? `<p class="plan-karta-kabel">Oddział: ${esc(odd)} (jak źródło zasilania)</p>` : '';
+    const rejW = rejony().wlasny.get(`${store}:${rec.id}`);
+    const rejZ = [...rejonyEl(store, rec)].filter((x) => x !== rejW);
+    const rejon = rejW || rejZ.length ? `<p class="plan-karta-kabel">${rejW ? `Rejon: ${esc(rejW)}${store === 'kb' || rec.rejon ? '' : ' (z sieci zasilania)'}` : ''}${rejW && rejZ.length ? ' · ' : ''}${rejZ.length ? `na drodze zasilania rejonu ${esc(rejZ.join(', '))}` : ''}</p>` : '';
     const przy = przyObiekcie(rec);
     const umiejsc = przy ? `<p class="plan-karta-kabel">Umiejscowienie: przy ${esc(opisObiektu(przy.store, przy.rec))}</p>` : '';
     const kabel = maOpisKabla(rec, 'kabel') ? `<p class="plan-karta-kabel">Kabel zasilający: ${esc(opisKabla(rec, 'kabel'))}${rec.kabel_odplyw ? ` (odpływ: ${esc(rec.kabel_odplyw)})` : ''}</p>` : '';
@@ -866,6 +831,7 @@ export function createPlanView(containerId) {
       <table>${wiersze}</table>
       ${wChodniku}
       ${oddz}
+      ${rejon}
       ${umiejsc}
       ${kabel}
       <div class="form-actions">
@@ -979,7 +945,45 @@ export function createPlanView(containerId) {
     return zr && zr.store !== 'poleRozdzielcze' ? oddzialRek(zr.store, zr.rec, d + 1) : '';
   }
   const obcyOddzial = (store, rec) => { const o = oddzialRek(store, rec); return mojOddzial !== 'wszystkie' && !!o && o !== mojOddzial; };
-  const ukryty = (store, rec) => !warstwy.inneOddzialy && obcyOddzial(store, rec);
+
+  // Rejon (05.11.2026): z sieci (siec-zasilania.js); chodnik należy do rejonu, gdy stoją w nim elementy rejonu
+  // (razem z chodnikami, od których odchodzi), albo gdy rejon wpisano przy chodniku (np. chodnik w przygotowaniu).
+  let rejCache = null;
+  let rejDane = null;
+  function rejony() {
+    if (rejCache && rejDane === dane) return rejCache;
+    const r = rejonySieci(dane);
+    const chodnikow = new Map();
+    const dodajCh = (chId, nazwa, d = 0) => {
+      if (!chId || d > 30) return;
+      if (!chodnikow.has(chId)) chodnikow.set(chId, new Set());
+      if (chodnikow.get(chId).has(nazwa)) return;
+      chodnikow.get(chId).add(nazwa);
+      const ch = (dane.chodniki || []).find((c) => c.id === chId);
+      const nad = ch && rozwiaz(ch.ch_od_chodnika, dane.chodniki || [], 'ch_nazwa');
+      if (nad) dodajCh(nad.id, nazwa, d + 1);
+    };
+    for (const ch of dane.chodniki || []) {
+      const w = ch.rejon ? rozwiaz(ch.rejon, dane.kb || [], 'kb_nazwa')?.kb_nazwa || (typeof ch.rejon === 'number' ? '' : String(ch.rejon).trim()) : '';
+      if (w) dodajCh(ch.id, w);
+    }
+    for (const st of MAGAZYNY_REJONU) {
+      for (const rec of dane[st] || []) {
+        const nazwa = r.wlasny.get(`${st}:${rec.id}`);
+        const lok = nazwa && st !== 'poleRozdzielcze' ? lokalizacja(st, rec) : null;
+        if (lok) dodajCh(lok.ch, nazwa);
+      }
+    }
+    const lista = [...new Set([...r.lista, ...[...chodnikow.values()].flatMap((x) => [...x])])].sort((a, b) => a.localeCompare(b, 'pl'));
+    rejCache = { ...r, chodnikow, lista };
+    rejDane = dane;
+    return rejCache;
+  }
+  const rejonyEl = (store, rec) => (store === 'chodniki' ? rejony().chodnikow.get(rec.id) : rejony().wRejonie.get(`${store}:${rec.id}`)) || new Set();
+  const obcyRejon = (store, rec) => { if (mojRejon === 'wszystkie') return false; const z = rejonyEl(store, rec); return z.size > 0 && !z.has(mojRejon); };
+  const obcyEl = (store, rec) => obcyOddzial(store, rec) || obcyRejon(store, rec);
+  const ukryty = (store, rec) => !warstwy.inneOddzialy && obcyEl(store, rec);
+  const dopiskObcego = (store, rec) => (obcyOddzial(store, rec) ? ` · odd. ${oddzialRek(store, rec)}` : ` · rejon ${[...rejonyEl(store, rec)].join(', ')}`);
 
   // opis chodnika: "nr 2 Chodnik 1 (odstawczy)"
   const opisChodnika = (ch) => (ch ? [ch.ch_nr ? `nr ${ch.ch_nr}` : '', ch.ch_nazwa || '', ch.ch_rodzaj ? `(${ch.ch_rodzaj})` : ''].filter(Boolean).join(' ') : '');
@@ -1068,7 +1072,6 @@ export function createPlanView(containerId) {
   // Listy źródeł i odpływów pokazują tylko połączenia zgodne z układem (ZRODLA_RODZAJU) i bez pętli.
 
   const nazwaRek = (store, rec) => rec[NADZOR_ENTITIES[store]?.titleField] || `#${rec.id}`;
-  const rodzajRek = (store, rec) => (store === 'urzadzenia' ? (jestOdbiornik(rec) ? 'odbiornik' : 'wylacznik') : store);
   const rodzajDef = (id) => RODZAJE.find((r) => r.id === id);
   const etykietaRodzaju = (id) => rodzajDef(id)?.krotko || id;
   const opisRek = (store, rec) => `${etykietaRodzaju(rodzajRek(store, rec))} ${nazwaRek(store, rec)}`;
@@ -1173,14 +1176,7 @@ export function createPlanView(containerId) {
   }
 
   // źródło zasilania głównego rekordu (pierwsze rozpoznane pole "zasilany z")
-  function zrodloRek(store, rec) {
-    for (const [pole, zStore, zPole, prefiks] of ZASILANIE[store] || []) {
-      if (prefiks === 'kabel_rez') continue;
-      const z = rozwiaz(rec[pole], dane[zStore] || [], zPole);
-      if (z) return { store: zStore, rec: z, pole };
-    }
-    return null;
-  }
+  const zrodloRek = (store, rec) => zrodloSieci(dane, store, rec);
   const maWpisaneZasilanie = (store, rec) => (ZASILANIE[store] || []).some(([pole, , , prefiks]) => prefiks !== 'kabel_rez' && !pusty(rec[pole]));
 
   // ustawia jedno źródło zasilania i czyści pozostałe pola "zasilany z" (urządzenie ma jedno źródło)
@@ -1659,6 +1655,11 @@ export function createPlanView(containerId) {
     }
   });
 
+  container.querySelector('[data-akcja-rejon]').addEventListener('change', (e) => {
+    mojRejon = e.target.value;
+    try { localStorage.setItem('protektor-plan-rejon', mojRejon); } catch {}
+    render();
+  });
   container.querySelector('[data-akcja-oddzial]').addEventListener('change', (e) => {
     mojOddzial = e.target.value;
     try { localStorage.setItem('protektor-plan-oddzial', mojOddzial); } catch {}
@@ -1820,5 +1821,5 @@ export function createPlanView(containerId) {
     return true;
   }
 
-  return { init, pokaz, _test: { oddzialRek, ustawOddzial: (o, pokazInne = true) => { mojOddzial = o; warstwy.inneOddzialy = pokazInne; }, opisChodnika, opcjePrzy, pozycje: () => rysuj(widok, { szer: 1000, wys: 700 }).poz, problemTypu, napieciaDoWyboru, katalog: () => katalog, zrodlaDla, odplywyDla, zgodnePolaczenie, problemyPolaczenia, rodzajPolaczenia, opcjeNapieciaFormularza, napiecieEfektywne, kilkaOdplywow, polaczenia: () => polaczenia().wynik, wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
+  return { init, pokaz, _test: { rejony, obcyRejon, ustawRejon: (r, pokazInne = true) => { mojRejon = r; warstwy.inneOddzialy = pokazInne; }, oddzialRek, ustawOddzial: (o, pokazInne = true) => { mojOddzial = o; warstwy.inneOddzialy = pokazInne; }, opisChodnika, opcjePrzy, pozycje: () => rysuj(widok, { szer: 1000, wys: 700 }).poz, problemTypu, napieciaDoWyboru, katalog: () => katalog, zrodlaDla, odplywyDla, zgodnePolaczenie, problemyPolaczenia, rodzajPolaczenia, opcjeNapieciaFormularza, napiecieEfektywne, kilkaOdplywow, polaczenia: () => polaczenia().wynik, wczytajPrzyklad, usunPrzyklad, rysuj: () => rysuj(widok, { szer: 1000, wys: 700 }), dane: () => dane } };
 }
