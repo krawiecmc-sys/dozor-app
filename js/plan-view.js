@@ -1243,11 +1243,11 @@ export function createPlanView(containerId) {
     const p1 = await dodaj('poleRozdzielcze', { p_nazwa: 'R-650 pole 1', miejsce_zabudowy: r });
     const p2 = await dodaj('poleRozdzielcze', { p_nazwa: 'R-650 pole 2', miejsce_zabudowy: r });
     const k = (nr, przekroj, dl) => ({ kabel_nr: nr, kabel_przekroj: przekroj, kabel_dlugosc: dl });
-    const t1 = await dodaj('transformatory', { t_nr: 'It3sb 340', t_napiecie: '6/1 kV', zasilany_z_pola: p1, lok_chodnik: ch1, lok_metraz: 190, lok_strona: 'lewa', ...k('K1', '3x50', 200) });
+    const t1 = await dodaj('transformatory', { t_nr: 'It3sb 340', t_napiecie: '6/0,5/1 kV', zasilany_z_pola: p1, lok_chodnik: ch1, lok_metraz: 190, lok_strona: 'lewa', ...k('K1', '3x50', 200) });
     const t2 = await dodaj('transformatory', { t_nr: 'Mar 439', t_napiecie: '6/0,5/1 kV', zasilany_z_pola: p2, lok_chodnik: ch4, lok_metraz: 80, lok_strona: 'lewa', ...k('K2', '3x50', 690) });
     const u = async (nazwa, zT, zU, ch, m, strona, kab, nap = '1 kV') =>
       dodaj('urzadzenia', { nazwa, u_rodzaj: nazwa.startsWith('HMC') ? U_RODZAJE[1] : U_RODZAJE[0], nap_zas: nap, zasilane_z_transformatora: zT ?? '', zasilane_z_urzadzenia: zU ?? '', lok_chodnik: ch, lok_metraz: m, lok_strona: strona, ...(kab || {}) });
-    const u1 = await u('WSN-40P/1', t1, null, ch2, 150, 'prawa', k('K3', '3x95', 290));
+    const u1 = await u('WSN-40P/1', t1, null, ch2, 150, 'prawa', k('K3', '3x95', 290), '0,5 kV'); // WSN-40P/1 tylko 500 V (Piotr, 05.11)
     const u2 = await u('BTH-125', t1, null, ch2, 150, 'prawa', k('K4', '3x70', 290));
     const u3 = await u('RE-22 (1.4)', t2, null, ch3, 190, 'lewa', k('K5', '3x35', 80), '0,5 kV'); // przykład: trafo dwunapięciowe, 0,5 kV
     const u4 = await u('RE-22 (1.5)', t2, null, ch4, 140, 'lewa', k('K6', '3x35', 60), '0,5 kV');
